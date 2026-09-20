@@ -310,7 +310,9 @@ function Dashboard(): React.JSX.Element {
         </div>
       </aside>
       <main className="min-w-0 flex-1 p-6">
-        {page === 'profiles' && <ProfilesPage client={client} eventCount={eventCount} />}
+        {page === 'profiles' && (
+          <ProfilesPage client={client} eventCount={eventCount} identity={identity} />
+        )}
         {page === 'clients' && <ClientsPage client={client} />}
         {page === 'proxies' && <ProxiesPage client={client} />}
         {page === 'backups' && <BackupsPage client={client} eventCount={eventCount} />}

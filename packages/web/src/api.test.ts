@@ -199,3 +199,26 @@ describe('api client', () => {
     expect(capturedBody).toEqual({ email: 'op@example.com', password: 'password-1' });
   });
 });
+
+describe('windowSync client', () => {
+  it('POSTs profile ids and URL to /v1/window-sync and returns the result', async () => {
+    let captured: CapturedRequest | undefined;
+    stubFetch((req) => {
+      captured = req;
+      return jsonResponse(200, {
+        synced: ['p1'],
+        failed: [{ profileId: 'p2', error: 'profile is not running' }],
+      });
+    });
+    const client = createApiClient('http://api:3000', () => 'mlt_secret');
+    const result = await client.windowSync(['p1', 'p2'], 'https://example.com/');
+    expect(captured?.url).toBe('http://api:3000/v1/window-sync');
+    expect(captured?.init.method).toBe('POST');
+    expect(JSON.parse(captured?.init.body as string)).toEqual({
+      profileIds: ['p1', 'p2'],
+      url: 'https://example.com/',
+    });
+    expect(result.synced).toEqual(['p1']);
+    expect(result.failed).toEqual([{ profileId: 'p2', error: 'profile is not running' }]);
+  });
+});

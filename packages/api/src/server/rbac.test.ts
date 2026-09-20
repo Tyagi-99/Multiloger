@@ -564,3 +564,61 @@ describe('cloud sync RBAC (live)', () => {
     expect(json.error.code).toBe('CLOUD_SYNC_ERROR');
   });
 });
+
+describe('window sync RBAC (live)', () => {
+  it('denies window sync for viewers (403)', async () => {
+    const { status } = await api<ErrorBody>('POST', '/v1/window-sync', viewerToken, {
+      profileIds: [profileA],
+      url: 'https://example.com/',
+    });
+    expect(status).toBe(403);
+  });
+
+  it('denies cross-client profiles before touching any browser (403)', async () => {
+    // profileB belongs to client B; the operator is scoped to client A.
+    const { status } = await api<ErrorBody>('POST', '/v1/window-sync', operatorToken, {
+      profileIds: [profileB],
+      url: 'https://example.com/',
+    });
+    expect(status).toBe(403);
+  });
+
+  it('rejects invalid URLs (400)', async () => {
+    const { status, json } = await api<ErrorBody>('POST', '/v1/window-sync', operatorToken, {
+      profileIds: [profileA],
+      url: 'javascript:alert(1)',
+    });
+    expect(status).toBe(400);
+    expect(json.error.code).toBe('WINDOW_SYNC_INVALID_URL');
+  });
+
+  it('requires a non-empty profile list (400)', async () => {
+    const { status } = await api<ErrorBody>('POST', '/v1/window-sync', operatorToken, {
+      profileIds: [],
+      url: 'https://example.com/',
+    });
+    expect(status).toBe(400);
+  });
+
+  it('404s on unknown profiles', async () => {
+    const { status } = await api<ErrorBody>('POST', '/v1/window-sync', operatorToken, {
+      profileIds: ['no-such-profile'],
+      url: 'https://example.com/',
+    });
+    expect(status).toBe(404);
+  });
+
+  it('reports stopped profiles as failed instead of throwing', async () => {
+    // Neither profile is running in this test (no Chromium launched).
+    const { status, json } = await api<{
+      synced: string[];
+      failed: { profileId: string; error: string }[];
+    }>('POST', '/v1/window-sync', operatorToken, {
+      profileIds: [profileA],
+      url: 'https://example.com/',
+    });
+    expect(status).toBe(200);
+    expect(json.synced).toEqual([]);
+    expect(json.failed).toEqual([{ profileId: profileA, error: 'profile is not running' }]);
+  });
+});

@@ -40,6 +40,7 @@ import { buildAutomationRoutes } from './automation-routes.js';
 import { buildTeamRoutes } from './team-routes.js';
 import { buildMonitoringRoutes } from './monitoring-routes.js';
 import { buildCloudSyncRoutes } from './cloudsync-routes.js';
+import { buildWindowSyncRoutes } from './windowsync-routes.js';
 import {
   accessibleClientIds,
   accessibleProfileIds,
@@ -230,9 +231,7 @@ async function getProfiles(ctx: RouteContext): Promise<void> {
   const visible =
     direct === null && clients === null
       ? profiles
-      : profiles.filter(
-          (p) => direct?.has(p.id) === true || clients?.has(p.client_id) === true,
-        );
+      : profiles.filter((p) => direct?.has(p.id) === true || clients?.has(p.client_id) === true);
   const detailed = await Promise.all(visible.map((p) => profileDetail(ctx, p.id)));
   sendJson(ctx.res, 200, { profiles: detailed });
 }
@@ -560,7 +559,9 @@ export function buildRoutes(): Route[] {
     }),
     defineRoute('GET', '/v1/profiles/:id/backups', listBackups, { permission: 'backups:read' }),
     defineRoute('GET', '/v1/backups/:backupId', getBackup, { permission: 'backups:read' }),
-    defineRoute('POST', '/v1/backups/:backupId/verify', verifyBackup, { permission: 'backups:read' }),
+    defineRoute('POST', '/v1/backups/:backupId/verify', verifyBackup, {
+      permission: 'backups:read',
+    }),
     defineRoute('POST', '/v1/backups/:backupId/restore', restoreBackup, {
       permission: 'backups:restore',
       audit: { action: 'backup.restore', entity: 'profile' },
@@ -573,5 +574,6 @@ export function buildRoutes(): Route[] {
     ...buildTeamRoutes(),
     ...buildMonitoringRoutes(),
     ...buildCloudSyncRoutes(),
+    ...buildWindowSyncRoutes(),
   ];
 }

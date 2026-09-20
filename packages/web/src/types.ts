@@ -249,3 +249,9 @@ export interface CloudSyncResult {
   skipped: string[];
   failed: { backupId: string; error: string }[];
 }
+
+/** Phase 4c: POST /v1/window-sync result. */
+export interface WindowSyncResult {
+  synced: string[];
+  failed: { profileId: string; error: string }[];
+}

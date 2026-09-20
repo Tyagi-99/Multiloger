@@ -30,6 +30,7 @@ import {
 import { InsufficientDiskSpaceError, LaunchQueueTimeoutError } from '../resources/manager.js';
 import { BackupBusyError, BackupCorruptError, BackupNotFoundError } from '../backups/service.js';
 import { S3Error, S3InsecureEndpointError } from '../cloudsync/s3.js';
+import { WindowSyncUrlError } from '../windowsync/service.js';
 import {
   CloudSyncClientRequiredError,
   CloudSyncCredentialsError,
@@ -196,6 +197,9 @@ export function toHttpError(error: unknown): MappedError {
   }
   if (error instanceof S3Error) {
     return mapped(error.httpStatus, 'CLOUD_SYNC_ERROR', error.message);
+  }
+  if (error instanceof WindowSyncUrlError) {
+    return mapped(400, 'WINDOW_SYNC_INVALID_URL', error.message);
   }
   if (error instanceof IllegalTransitionError) {
     return mapped(409, 'ILLEGAL_STATE_TRANSITION', error.message);

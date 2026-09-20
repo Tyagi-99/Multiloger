@@ -24,6 +24,7 @@ import type {
   RoleInfo,
   Session,
   TeamUser,
+  WindowSyncResult,
 } from './types.js';
 
 export class ApiError extends Error {
@@ -183,6 +184,8 @@ export interface ApiClient {
     clientId?: string,
   ): Promise<{ backupId: string; profileId: string }>;
   pruneCloudObjects(): Promise<{ deleted: string[] }>;
+
+  windowSync(profileIds: string[], url: string): Promise<WindowSyncResult>;
 }
 
 export function createApiClient(baseUrl: string, getToken: () => string | null): ApiClient {
@@ -359,6 +362,9 @@ export function createApiClient(baseUrl: string, getToken: () => string | null):
         clientId === undefined ? { key, name } : { key, name, clientId },
       ),
     pruneCloudObjects: () => post<{ deleted: string[] }>('/v1/cloud-sync/prune'),
+
+    windowSync: (profileIds: string[], url: string) =>
+      post<WindowSyncResult>('/v1/window-sync', { profileIds, url }),
   };
 }
 

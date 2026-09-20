@@ -141,7 +141,9 @@ async function connectCdp(wsUrl: string, timeoutMs: number): Promise<CdpConnecti
           }
           resolve();
         } else {
-          reject(new CdpError(`CDP handshake failed: ${(head.split('\r\n')[0] ?? '').slice(0, 80)}`));
+          reject(
+            new CdpError(`CDP handshake failed: ${(head.split('\r\n')[0] ?? '').slice(0, 80)}`),
+          );
         }
       }
     };
@@ -153,7 +155,10 @@ async function connectCdp(wsUrl: string, timeoutMs: number): Promise<CdpConnecti
   });
 
   let nextId = 1;
-  const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  const pending = new Map<
+    number,
+    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+  >();
   const eventHandlers = new Map<string, Set<(params: unknown) => void>>();
   let recvBuf = Buffer.alloc(0);
   let closedResolve: () => void = () => {
@@ -273,6 +278,53 @@ async function connectCdp(wsUrl: string, timeoutMs: number): Promise<CdpConnecti
 }
 
 /**
+ * A debuggable target from the browser's /json/list endpoint.
+ */
+export interface CdpTargetInfo {
+  id: string;
+  type: string;
+  url: string;
+  webSocketDebuggerUrl: string | null;
+}
+
+/**
+ * List the browser's debuggable targets via /json/list. Used by window
+ * sync to find a page target to navigate and bring to front.
+ */
+export async function listCdpTargets(
+  cdpHttpUrl: string,
+  timeoutMs: number,
+): Promise<CdpTargetInfo[]> {
+  const response = await fetch(`${cdpHttpUrl}/json/list`, {
+    signal: AbortSignal.timeout(timeoutMs),
+  }).catch((error: unknown) => {
+    throw new CdpError(`CDP /json/list unreachable: ${(error as Error).message}`);
+  });
+  if (!response.ok) {
+    throw new CdpError(`CDP /json/list answered HTTP ${String(response.status)}`);
+  }
+  const targets: unknown = await response.json();
+  if (!Array.isArray(targets)) {
+    throw new CdpError('CDP /json/list did not return a target array');
+  }
+  return targets.map((entry) => {
+    const t = entry as {
+      id?: unknown;
+      type?: unknown;
+      url?: unknown;
+      webSocketDebuggerUrl?: unknown;
+    };
+    return {
+      id: typeof t.id === 'string' ? t.id : '',
+      type: typeof t.type === 'string' ? t.type : '',
+      url: typeof t.url === 'string' ? t.url : '',
+      webSocketDebuggerUrl:
+        typeof t.webSocketDebuggerUrl === 'string' ? t.webSocketDebuggerUrl : null,
+    };
+  });
+}
+
+/**
  * Read the debugger WebSocket URL from the browser's /json/version endpoint.
  */
 export async function getDebuggerWsUrl(cdpHttpUrl: string, timeoutMs: number): Promise<string> {
@@ -285,7 +337,10 @@ export async function getDebuggerWsUrl(cdpHttpUrl: string, timeoutMs: number): P
     throw new CdpError(`CDP /json/version answered HTTP ${String(response.status)}`);
   }
   const version = (await response.json()) as { webSocketDebuggerUrl?: string };
-  if (typeof version.webSocketDebuggerUrl !== 'string' || version.webSocketDebuggerUrl.length === 0) {
+  if (
+    typeof version.webSocketDebuggerUrl !== 'string' ||
+    version.webSocketDebuggerUrl.length === 0
+  ) {
     throw new CdpError('CDP /json/version had no webSocketDebuggerUrl');
   }
   return version.webSocketDebuggerUrl;
@@ -333,8 +388,12 @@ export async function createCdpEventSession(
   const connection = await connectCdp(wsUrl, timeoutMs);
   return {
     send: (method, params) => connection.send(method, params),
-    onEvent: (event, handler) => { connection.onEvent(event, handler); },
-    close: () => { connection.close(); },
+    onEvent: (event, handler) => {
+      connection.onEvent(event, handler);
+    },
+    close: () => {
+      connection.close();
+    },
     closed: connection.closed,
   };
 }
