@@ -38,6 +38,7 @@ import { resolveProxyForLaunch } from '../proxies/service.js';
 import { createApiToken, listApiTokens } from './tokens.js';
 import { buildAutomationRoutes } from './automation-routes.js';
 import { buildTeamRoutes } from './team-routes.js';
+import { buildMonitoringRoutes } from './monitoring-routes.js';
 import {
   accessibleClientIds,
   accessibleProfileIds,
@@ -569,5 +570,6 @@ export function buildRoutes(): Route[] {
     }),
     ...buildAutomationRoutes(),
     ...buildTeamRoutes(),
+    ...buildMonitoringRoutes(),
   ];
 }

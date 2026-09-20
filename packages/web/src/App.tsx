@@ -13,18 +13,20 @@ import { ClientsPage } from './pages/Clients.js';
 import { ProxiesPage } from './pages/Proxies.js';
 import { TokensPage } from './pages/Tokens.js';
 import { BackupsPage } from './pages/Backups.js';
+import { MonitoringPage } from './pages/Monitoring.js';
 import { TeamPage } from './pages/Team.js';
 import { AuditPage } from './pages/Audit.js';
 import { Button, Field, inputClass } from './ui.js';
 import type { IdentityInfo } from './types.js';
 
-type Page = 'profiles' | 'clients' | 'proxies' | 'backups' | 'tokens' | 'team' | 'audit';
+type Page = 'profiles' | 'clients' | 'proxies' | 'backups' | 'tokens' | 'team' | 'audit' | 'monitoring';
 
 const ALL_NAV: { id: Page; label: string; permission: string }[] = [
   { id: 'profiles', label: 'Profiles', permission: 'profiles:read' },
   { id: 'clients', label: 'Clients', permission: 'clients:read' },
   { id: 'proxies', label: 'Proxies', permission: 'proxies:read' },
   { id: 'backups', label: 'Backups', permission: 'backups:read' },
+  { id: 'monitoring', label: 'Monitoring', permission: 'monitoring:read' },
   { id: 'tokens', label: 'API tokens', permission: 'tokens:read' },
   { id: 'team', label: 'Team', permission: 'users:manage' },
   { id: 'audit', label: 'Audit log', permission: 'audit:read' },
@@ -182,6 +184,8 @@ function Dashboard(): React.JSX.Element {
   const [eventCount, setEventCount] = useState(0);
   const [resources, setResources] = useState<ResourceStatus | null>(null);
   const [identity, setIdentity] = useState<IdentityInfo | null>(null);
+  /** Active alert count for the sidebar indicator; null when not permitted. */
+  const [alertCount, setAlertCount] = useState<number | null>(null);
 
   const onEvent = useCallback((_event: DomainEvent) => {
     setEventCount((n) => n + 1);
@@ -193,6 +197,12 @@ function Dashboard(): React.JSX.Element {
       setResources(await client.resourceStatus());
     } catch {
       setResources(null);
+    }
+    try {
+      const summary = await client.monitoringSummary();
+      setAlertCount(summary.alerts.length);
+    } catch {
+      setAlertCount(null); // no monitoring:read — hide the indicator
     }
   }, [client]);
 
@@ -270,6 +280,17 @@ function Dashboard(): React.JSX.Element {
             ) : (
               <div>governor disabled</div>
             )}
+            {alertCount !== null && (
+              <div
+                className={`mt-1 text-xs font-medium ${
+                  alertCount > 0 ? 'text-red-400' : 'text-zinc-500'
+                }`}
+              >
+                {alertCount > 0
+                  ? `⚠ ${String(alertCount)} active alert${alertCount === 1 ? '' : 's'}`
+                  : 'no active alerts'}
+              </div>
+            )}
             <div className="mt-1">{statusDot(eventsStatus)}</div>
           </div>
           <Button variant="ghost" onClick={logout}>
@@ -285,6 +306,7 @@ function Dashboard(): React.JSX.Element {
         {page === 'tokens' && <TokensPage client={client} />}
         {page === 'team' && <TeamPage client={client} identity={identity} />}
         {page === 'audit' && <AuditPage client={client} />}
+        {page === 'monitoring' && <MonitoringPage client={client} eventCount={eventCount} />}
       </main>
     </div>
   );

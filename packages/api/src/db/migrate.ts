@@ -19,6 +19,7 @@ import { backups } from './migrations/005-backups.js';
 import { automation } from './migrations/006-automation.js';
 import { dropScriptNameUnique } from './migrations/007-drop-script-name-unique.js';
 import { apiTeams } from './migrations/008-teams.js';
+import { phase4 } from './migrations/009-phase4.js';
 
 export interface Migration {
   readonly name: string;
@@ -36,6 +37,7 @@ export const MIGRATIONS: readonly Migration[] = [
   automation,
   dropScriptNameUnique,
   apiTeams,
+  phase4,
 ];
 
 async function ensureJournalTable(db: Kysely<DatabaseSchema>): Promise<void> {

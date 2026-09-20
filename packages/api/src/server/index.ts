@@ -31,6 +31,9 @@ import { resolveProxyAuthForLaunch, resolveProxyForLaunch } from '../proxies/ser
 import { resolveVaultPath } from '../vault/index.js';
 import { automationEvents } from '../automation/events.js';
 import { AutomationRunner } from '../automation/runner.js';
+import { monitoringEvents } from '../monitoring/events.js';
+import { MonitoringService } from '../monitoring/service.js';
+import type { MonitoringThresholds } from '../monitoring/metrics.js';
 import { authenticateRequest, createApiToken } from './tokens.js';
 import { requirePermission, resolveIdentity, type Identity } from './access.js';
 import { recordAudit } from './audit.js';
@@ -74,6 +77,18 @@ export interface ServerOptions {
    */
   automation?: {
     maxConcurrentRuns?: number;
+  };
+  /**
+   * Monitoring + alerting (Phase 4a). Thresholds follow
+   * monitoring/metrics.ts defaults; the webhook URL is opt-in and only
+   * ever a generic JSON POST on alert transitions.
+   */
+  monitoring?: {
+    thresholds?: Partial<MonitoringThresholds>;
+    intervalMs?: number;
+    metricsCacheMs?: number;
+    webhookUrl?: string;
+    webhookTimeoutMs?: number;
   };
   /**
    * Directory holding the built dashboard (Task 10). When set, GET/HEAD
@@ -212,6 +227,35 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   });
   await automation.start();
 
+  // Monitoring + alerting (Phase 4a): threshold evaluation on an
+  // interval, alert transitions bridged to the dashboard WebSocket.
+  const monitoring = new MonitoringService({
+    db,
+    dataDir: options.dataDir,
+    startedAtMs: Date.now(),
+    queueInfo: () => {
+      const status = resources.status;
+      return { depth: status.queued.length, queuedIds: [...status.queued] };
+    },
+    watermarkBytes: () => resources.status.minFreeDiskBytes,
+    ...(options.monitoring?.thresholds !== undefined
+      ? { thresholds: options.monitoring.thresholds }
+      : {}),
+    ...(options.monitoring?.intervalMs !== undefined
+      ? { intervalMs: options.monitoring.intervalMs }
+      : {}),
+    ...(options.monitoring?.metricsCacheMs !== undefined
+      ? { metricsCacheMs: options.monitoring.metricsCacheMs }
+      : {}),
+    ...(options.monitoring?.webhookUrl !== undefined
+      ? { webhookUrl: options.monitoring.webhookUrl }
+      : {}),
+    ...(options.monitoring?.webhookTimeoutMs !== undefined
+      ? { webhookTimeoutMs: options.monitoring.webhookTimeoutMs }
+      : {}),
+  });
+  monitoring.start();
+
   // Bootstrap: first start with no tokens prints a one-time token.
   let bootstrapToken: string | null = null;
   const existing = await db.selectFrom('api_tokens').select('id').limit(1).execute();
@@ -313,6 +357,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
           resources,
           backups,
           automation,
+          monitoring,
         };
         await route.handler(ctx);
         // Public mutating routes (login, invite redeem) also audit.
@@ -402,6 +447,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         resources,
         backups,
         automation,
+        monitoring,
       };
       await route.handler(ctx);
       // Phase 3: every mutating route with an audit config records an entry
@@ -458,6 +504,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   const offAutomationEvents = automationEvents.on((event) => {
     hub.broadcast(event);
   });
+  const offMonitoringEvents = monitoringEvents.on((event) => {
+    hub.broadcast(event);
+  });
 
   const port = options.port ?? 0;
   await new Promise<void>((resolve, reject) => {
@@ -480,9 +529,11 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     closed = true;
     offEvents();
     offAutomationEvents();
+    offMonitoringEvents();
     hub.close();
     resources.close();
     await automation.close();
+    monitoring.close();
     await manager.shutdown();
     await new Promise<void>((resolve) => {
       httpServer.close(() => {

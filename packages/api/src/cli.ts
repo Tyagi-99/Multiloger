@@ -40,6 +40,11 @@ export interface CliConfig {
   /** Dashboard build dir; undefined = API-only mode. */
   webDir?: string;
   headless: boolean;
+  /**
+   * Opt-in generic webhook URL for monitoring alert transitions
+   * (MULTILOGER_MONITORING_WEBHOOK). Unset = no webhook.
+   */
+  monitoringWebhookUrl?: string;
 }
 
 function parsePort(raw: string | undefined, source: string): number {
@@ -131,6 +136,7 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
   let webDir = env.MULTILOGER_WEB_DIR;
   let noWeb = false;
   let headless = parseHeadless(env.MULTILOGER_HEADLESS);
+  let monitoringWebhookUrl = env.MULTILOGER_MONITORING_WEBHOOK;
 
   const takeValue = (flag: string, i: number): string => {
     const value = argv[i + 1];
@@ -175,6 +181,9 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       case '--headful':
         headless = false;
         break;
+      case '--monitoring-webhook':
+        monitoringWebhookUrl = takeValue(arg, i++);
+        break;
       default:
         throw new CliError(`Unknown option: ${arg} (see --help)`);
     }
@@ -206,6 +215,9 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
   };
   if (chromiumPath !== undefined && chromiumPath.length > 0) {
     resolved.chromiumPath = chromiumPath;
+  }
+  if (monitoringWebhookUrl !== undefined && monitoringWebhookUrl.length > 0) {
+    resolved.monitoringWebhookUrl = monitoringWebhookUrl;
   }
   if (!noWeb) {
     if (webDir !== undefined && webDir.length > 0) {
@@ -268,6 +280,9 @@ export async function runCli(config: CliConfig): Promise<void> {
       ...(config.chromiumPath !== undefined ? { chromiumPath: config.chromiumPath } : {}),
       headless: config.headless,
       ...(config.webDir !== undefined ? { webDir: config.webDir } : {}),
+      ...(config.monitoringWebhookUrl !== undefined
+        ? { monitoring: { webhookUrl: config.monitoringWebhookUrl } }
+        : {}),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

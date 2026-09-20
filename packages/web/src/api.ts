@@ -13,6 +13,7 @@ import type {
   IdentityInfo,
   InvitationInfo,
   LaunchReadiness,
+  MonitoringSummary,
   ProfileDetail,
   PublicProxy,
   ResourceStatus,
@@ -165,6 +166,8 @@ export interface ApiClient {
   deleteBackup(backupId: string): Promise<{ deleted: boolean }>;
 
   resourceStatus(): Promise<ResourceStatus>;
+
+  monitoringSummary(): Promise<MonitoringSummary>;
 }
 
 export function createApiClient(baseUrl: string, getToken: () => string | null): ApiClient {
@@ -327,6 +330,7 @@ export function createApiClient(baseUrl: string, getToken: () => string | null):
     deleteBackup: (backupId) => del<{ deleted: boolean }>(`/v1/backups/${backupId}`),
 
     resourceStatus: () => get<ResourceStatus>('/v1/resources'),
+    monitoringSummary: () => get<MonitoringSummary>('/v1/monitoring/summary'),
   };
 }
 

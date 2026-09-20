@@ -231,6 +231,36 @@ export interface BackupsTable {
   created_at: string;
 }
 
+/** Encrypted cloud-sync configuration (single row, id = 'default'). */
+export interface CloudSyncConfigTable {
+  id: string;
+  /** S3-compatible endpoint URL, e.g. https://s3.eu-central-1.amazonaws.com */
+  endpoint: string;
+  bucket: string;
+  region: string;
+  /**
+   * Vault secret names for the S3 credentials — names only, never values.
+   * The plaintext credentials live exclusively in the vault.
+   */
+  access_key_secret: string;
+  secret_key_secret: string;
+  /** Remote objects kept by prune; older ones are deleted. */
+  retention: number;
+  /** 1 = allow http:// endpoints (local testing/MinIO); 0 = https only. */
+  allow_insecure: number;
+  updated_at: string;
+}
+
+/** Tracks which local backups have been uploaded to the remote bucket. */
+export interface CloudSyncObjectsTable {
+  /** Local backup id (== remote object stem). */
+  backup_id: string;
+  object_key: string;
+  etag: string | null;
+  size_bytes: number;
+  uploaded_at: string;
+}
+
 export interface DatabaseSchema {
   clients: ClientsTable;
   profiles: ProfilesTable;
@@ -239,6 +269,8 @@ export interface DatabaseSchema {
   profile_proxy_assignments: ProfileProxyAssignmentsTable;
   api_tokens: ApiTokensTable;
   backups: BackupsTable;
+  cloud_sync_config: CloudSyncConfigTable;
+  cloud_sync_objects: CloudSyncObjectsTable;
   automation_scripts: AutomationScriptsTable;
   automation_jobs: AutomationJobsTable;
   automation_runs: AutomationRunsTable;

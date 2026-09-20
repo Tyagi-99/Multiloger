@@ -170,3 +170,41 @@ export interface DomainEvent {
   type: string;
   [key: string]: unknown;
 }
+
+/** Phase 4a: one active alert from the monitoring service. */
+export interface MonitoringAlert {
+  id: string;
+  severity: 'warning' | 'critical';
+  message: string;
+  at: string;
+}
+
+/** Phase 4a: point-in-time operational metrics. */
+export interface SystemMetrics {
+  at: string;
+  uptimeSec: number;
+  profiles: { total: number; byState: Record<string, number> };
+  queue: { depth: number; queuedIds: string[] };
+  disk: {
+    freeBytes: number | null;
+    totalBytes: number | null;
+    watermarkBytes: number;
+    belowWatermark: boolean;
+  };
+  sessions: { started: number; crashed: number; errored: number };
+  runs: {
+    total: number;
+    completed: number;
+    failed: number;
+    timedOut: number;
+    cancelled: number;
+    failureRate: number;
+  };
+  backups: { count: number; totalBytes: number };
+}
+
+/** Phase 4a: GET /v1/monitoring/summary. */
+export interface MonitoringSummary {
+  metrics: SystemMetrics;
+  alerts: MonitoringAlert[];
+}

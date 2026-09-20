@@ -10,6 +10,7 @@ import type { ProfileManager } from '../profiles/manager.js';
 import type { ResourceManager } from '../resources/manager.js';
 import type { BackupService } from '../backups/service.js';
 import type { AutomationRunner } from '../automation/runner.js';
+import type { MonitoringService } from '../monitoring/service.js';
 import type { ApiTokensTable } from './tokens.js';
 import type { Identity } from './access.js';
 import type { AuditActorType } from './audit.js';
@@ -54,6 +55,8 @@ export interface RouteContext {
   backups: BackupService;
   /** Automation job runner (Phase 2a). */
   automation: AutomationRunner;
+  /** Monitoring + alerting (Phase 4a). Undefined in bare test contexts. */
+  monitoring: MonitoringService | undefined;
 }
 
 export type RouteHandler = (ctx: RouteContext) => Promise<void>;
