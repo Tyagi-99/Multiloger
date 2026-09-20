@@ -31,6 +31,7 @@ export async function createProfile(
       locked_by: null,
       locked_at: null,
       user_data_dir: input.userDataDir,
+      proxy_required: 0,
       created_at: now,
       updated_at: now,
     })

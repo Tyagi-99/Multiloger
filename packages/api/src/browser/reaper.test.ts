@@ -33,6 +33,10 @@ describe('startup reaper', () => {
     if (fixture) {
       // Belt and braces: nothing launched in these tests may survive.
       killOrphanBrowsers(fixture.dir, new Set());
+      const start = Date.now();
+      while (findManagedChromiumProcesses(fixture.dir).length > 0 && Date.now() - start < 5000) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
       await closeDatabase(fixture.db);
       rmSync(fixture.dir, { recursive: true, force: true });
       fixture = undefined;

@@ -56,12 +56,30 @@ describe('waitForCdpReady', () => {
   });
 });
 
+/** SIGKILL the group and wait until the main PID is actually gone, so a
+ *  following rmSync never races Chromium's shutdown file writes. */
+async function killAndWait(pid: number, timeoutMs = 5000): Promise<void> {
+  killBrowserGroup(pid);
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
+        return;
+      }
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 describe('launchChromium (live)', () => {
   const launched: { pid: number }[] = [];
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const { pid } of launched.splice(0)) {
-      killBrowserGroup(pid);
+      await killAndWait(pid);
     }
   });
 
@@ -87,6 +105,9 @@ describe('launchChromium (live)', () => {
       const version = await waitForCdpReady(browser.cdpUrl, 5000);
       expect(version.webSocketDebuggerUrl).toBe(browser.wsUrl);
     } finally {
+      for (const { pid } of launched.splice(0)) {
+        await killAndWait(pid);
+      }
       rmSync(dir, { recursive: true, force: true });
     }
   }, 60_000);
@@ -101,6 +122,9 @@ describe('launchChromium (live)', () => {
       expect(a.port).not.toBe(b.port);
       expect(a.pid).not.toBe(b.pid);
     } finally {
+      for (const { pid } of launched.splice(0)) {
+        await killAndWait(pid);
+      }
       rmSync(dir, { recursive: true, force: true });
     }
   }, 60_000);

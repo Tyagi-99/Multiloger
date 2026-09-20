@@ -41,11 +41,28 @@ export class InvalidProxyError extends Error {
 const HOST_PATTERN = /^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/;
 
 function validateProxy(proxy: ProxyFlagOptions): void {
-  if (!HOST_PATTERN.test(proxy.host)) {
-    throw new InvalidProxyError(`host ${JSON.stringify(proxy.host)} is not a valid hostname or IP`);
+  assertValidProxyEndpoint(proxy.scheme, proxy.host, proxy.port);
+}
+
+/**
+ * Validate a proxy endpoint before it is stored or used. Shared by the
+ * proxy repository (Task 6) and the flag builder so both reject the same
+ * malformed input. `socks4` is accepted by Chromium flags but the managed
+ * proxy model only offers http/https/socks5.
+ */
+export function assertValidProxyEndpoint(
+  scheme: string,
+  host: string,
+  port: number,
+): void {
+  if (scheme !== 'http' && scheme !== 'https' && scheme !== 'socks5' && scheme !== 'socks4') {
+    throw new InvalidProxyError(`scheme ${JSON.stringify(scheme)} is not supported`);
   }
-  if (!Number.isInteger(proxy.port) || proxy.port < 1 || proxy.port > 65535) {
-    throw new InvalidProxyError(`port ${JSON.stringify(proxy.port)} is out of range 1-65535`);
+  if (!HOST_PATTERN.test(host)) {
+    throw new InvalidProxyError(`host ${JSON.stringify(host)} is not a valid hostname or IP`);
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new InvalidProxyError(`port ${JSON.stringify(port)} is out of range 1-65535`);
   }
 }
 

@@ -59,16 +59,19 @@ describe('migration runner', () => {
     db = openDatabase({ path: join(dir, 'test.db') });
 
     await migrateToLatest(db);
-    const revertedLatest = await migrateDown(db, 1);
-    expect(revertedLatest).toEqual(['002-sessions']);
+    expect(await migrateDown(db, 1)).toEqual(['003-proxies']);
 
     let tables = await tableNames(db);
+    expect(tables).not.toContain('proxies');
+    expect(tables).not.toContain('profile_proxy_assignments');
+    expect(tables).toContain('sessions');
+
+    expect(await migrateDown(db, 1)).toEqual(['002-sessions']);
+    tables = await tableNames(db);
     expect(tables).not.toContain('sessions');
     expect(tables).toContain('profiles');
 
-    const revertedBaseline = await migrateDown(db, 1);
-    expect(revertedBaseline).toEqual(['001-baseline']);
-
+    expect(await migrateDown(db, 1)).toEqual(['001-baseline']);
     tables = await tableNames(db);
     expect(tables).not.toContain('clients');
     expect(tables).not.toContain('profiles');
@@ -77,7 +80,7 @@ describe('migration runner', () => {
     expect(journal).toEqual([]);
 
     // and the schema can be re-applied cleanly afterwards
-    expect(await migrateToLatest(db)).toEqual(['001-baseline', '002-sessions']);
+    expect(await migrateToLatest(db)).toEqual(['001-baseline', '002-sessions', '003-proxies']);
   });
 
   it('rejects invalid step counts', async () => {

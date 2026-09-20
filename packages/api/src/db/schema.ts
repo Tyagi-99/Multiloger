@@ -38,6 +38,8 @@ export interface ProfilesTable {
   last_cdp_port: number | null;
   /** ISO-8601 timestamp of the last launch; null when never launched. */
   last_launched_at: string | null;
+  /** 1 = launching this profile without a healthy assigned proxy is refused. */
+  proxy_required: number;
   created_at: string;
   updated_at: string;
 }
@@ -60,9 +62,40 @@ export interface SessionsTable {
   cdp_port: number | null;
 }
 
+/** Managed proxy endpoint. The password itself is never stored — see password_secret_ref. */
+export interface ProxiesTable {
+  id: string;
+  name: string;
+  /** 'http' | 'https' | 'socks5'. */
+  scheme: string;
+  host: string;
+  port: number;
+  /** Proxy username (not secret). Null when the proxy needs no auth. */
+  username: string | null;
+  /**
+   * Opaque credential reference, e.g. `env:ACME_PROXY_PASSWORD`, resolved
+   * from the process environment at launch time. Never a plaintext secret.
+   */
+  password_secret_ref: string | null;
+  /** Chromium --proxy-bypass-list override; null means the default. */
+  bypass: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** At most one proxy assigned per profile (MVP). */
+export interface ProfileProxyAssignmentsTable {
+  profile_id: string;
+  proxy_id: string;
+  created_at: string;
+}
+
 export interface DatabaseSchema {
   clients: ClientsTable;
   profiles: ProfilesTable;
   sessions: SessionsTable;
+  proxies: ProxiesTable;
+  profile_proxy_assignments: ProfileProxyAssignmentsTable;
   _migrations: MigrationsTable;
 }

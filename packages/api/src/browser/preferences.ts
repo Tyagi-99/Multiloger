@@ -2,9 +2,8 @@
  * Seed the Chromium Preferences file for a brand-new profile directory.
  *
  * Only writes when `<userDataDir>/Default/Preferences` does not exist yet —
- * an existing profile's Preferences are never touched. Currently used for
- * the WebRTC IP-handling policy (Task 6 decides the value per profile);
- * other pinned settings (locale, permissions) will extend this module.
+ * an existing profile's Preferences are never touched by this function
+ * (per-launch policy updates live in the proxy leak guards, Task 6).
  *
  * This is honest configuration of a real browser (matching the
  * architecture report's §5.1 line), not signal spoofing.
@@ -24,6 +23,13 @@ export interface SeedPreferencesOptions {
 }
 
 /**
+ * Base preferences for a brand-new profile. Deliberately minimal — every
+ * entry here is a real, documented Chromium preference. Extended over time
+ * (locale, permissions, …).
+ */
+export const DEFAULT_PREFERENCES: Record<string, unknown> = {};
+
+/**
  * @returns true when the file was written, false when it already existed.
  */
 export function seedPreferences(
@@ -37,7 +43,7 @@ export function seedPreferences(
   }
   mkdirSync(defaultDir, { recursive: true, mode: 0o700 });
 
-  const preferences: Record<string, unknown> = {};
+  const preferences: Record<string, unknown> = { ...DEFAULT_PREFERENCES };
   if (options.webrtcIpHandlingPolicy) {
     preferences.webrtc = { ip_handling_policy: options.webrtcIpHandlingPolicy };
   }

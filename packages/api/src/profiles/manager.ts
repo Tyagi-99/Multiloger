@@ -26,6 +26,7 @@ import { IllegalTransitionError } from './states.js';
 import { acquireLock, heartbeatLock, newOwnerToken, releaseLock } from './lock.js';
 import { getProfile } from './repository.js';
 import { endSession, startSession, type SessionExitReason } from './sessions.js';
+import { ensureWebrtcPolicy } from '../proxies/leak-guards.js';
 
 export class AlreadyRunningError extends Error {
   readonly code = 'ALREADY_RUNNING';
@@ -209,9 +210,18 @@ export class ProfileManager {
       throw error;
     }
 
-    const proxy = this.resolveProxy ? await this.resolveProxy(profileId) : undefined;
     let browser: LaunchedBrowser;
     try {
+      // The proxy resolver runs INSIDE the failure path: a throwing resolver
+      // (required proxy missing, unhealthy proxy) must land the profile in
+      // 'error' and release the lock — never leak it with state 'launching'.
+      const proxy = this.resolveProxy ? await this.resolveProxy(profileId) : undefined;
+      // Per-launch leak-guard policy, updated in place so proxy assignment
+      // changes apply to existing profiles on the next launch.
+      ensureWebrtcPolicy(
+        profile.user_data_dir,
+        proxy ? 'disable_non_proxied_udp' : 'default_public_interface_only',
+      );
       browser = await launchChromium({
         userDataDir: profile.user_data_dir,
         headless: headless ?? this.headless,
