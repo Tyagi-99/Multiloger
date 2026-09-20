@@ -59,9 +59,15 @@ describe('migration runner', () => {
     db = openDatabase({ path: join(dir, 'test.db') });
 
     await migrateToLatest(db);
+    expect(await migrateDown(db, 1)).toEqual(['007-drop-script-name-unique']);
+
+    // 007's rollback restores the unique index but keeps the tables.
+    let tables = await tableNames(db);
+    expect(tables).toContain('automation_scripts');
+
     expect(await migrateDown(db, 1)).toEqual(['006-automation']);
 
-    let tables = await tableNames(db);
+    tables = await tableNames(db);
     expect(tables).not.toContain('automation_scripts');
     expect(tables).not.toContain('automation_jobs');
     expect(tables).not.toContain('automation_runs');
@@ -107,6 +113,7 @@ describe('migration runner', () => {
       '004-api-tokens',
       '005-backups',
       '006-automation',
+      '007-drop-script-name-unique',
     ]);
   });
 

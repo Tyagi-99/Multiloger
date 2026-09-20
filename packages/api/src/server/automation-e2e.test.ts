@@ -349,6 +349,27 @@ describe('automation API', () => {
     expect(missing.json.error.code).toBe('SCRIPT_NOT_FOUND');
   });
 
+  it('allows two different scripts to share a name (names are labels, ids are identity)', async () => {
+    const steps = [{ type: 'wait', ms: 10 }];
+    const first = await api<{ script: ScriptShape }>(
+      'POST',
+      '/v1/automation/scripts',
+      { name: 'shared name', steps },
+      token,
+    );
+    const second = await api<{ script: ScriptShape }>(
+      'POST',
+      '/v1/automation/scripts',
+      { name: 'shared name', steps },
+      token,
+    );
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(second.json.script.id).not.toBe(first.json.script.id);
+    expect(second.json.script.name).toBe('shared name');
+    expect(second.json.script.version).toBe(1);
+  });
+
   it('rejects invalid scripts with INVALID_SCRIPT', async () => {
     const badSteps = await api<ErrorBody>(
       'POST',

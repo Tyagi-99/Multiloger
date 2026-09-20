@@ -138,8 +138,10 @@ export interface DatabaseSchema {
 }
 
 /**
- * Versioned automation script. One row per (name, version); jobs pin a
- * script id + version so re-publishing a script never changes history.
+ * Versioned automation script. One row per (id, version): the id is the
+ * script's stable identity and versions accumulate as new rows. Jobs pin an
+ * exact (script_id, script_version) so re-publishing a script never changes
+ * history. `name` is only a human label — different scripts may share a name.
  * `steps` is JSON: an array of declarative step objects (see
  * automation/script.ts for the step language).
  */
