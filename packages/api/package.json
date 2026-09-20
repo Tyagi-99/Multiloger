@@ -22,9 +22,13 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node ./dist/cli.js"
   },
   "type": "module",
   "types": "./dist/index.d.ts",
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "bin": {
+    "multiloger": "./dist/cli.js"
+  }
 }

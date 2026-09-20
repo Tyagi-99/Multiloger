@@ -13,6 +13,7 @@
 
 import { execFile } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
+import { isAbsolute, posix, win32 } from 'node:path';
 
 /** Basename patterns excluded from every backup. */
 export const TAR_EXCLUDES = [
@@ -31,13 +32,18 @@ export const TAR_EXCLUDES = [
 
 function runTar(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('tar', args, { timeout: 300_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
-      if (error) {
-        reject(new Error(`tar ${args[0] ?? ''} failed: ${stderr.trim() || error.message}`));
-      } else {
-        resolve(stdout);
-      }
-    });
+    execFile(
+      'tar',
+      args,
+      { timeout: 300_000, maxBuffer: 64 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(`tar ${args[0] ?? ''} failed: ${stderr.trim() || error.message}`));
+        } else {
+          resolve(stdout);
+        }
+      },
+    );
   });
 }
 
@@ -60,4 +66,39 @@ export async function listTar(archivePath: string): Promise<string[]> {
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
+}
+
+export class UnsafeArchiveMemberError extends Error {
+  readonly members: string[];
+  constructor(members: string[]) {
+    super(`Unsafe archive member(s): ${members.map((m) => JSON.stringify(m)).join(', ')}`);
+    this.name = 'UnsafeArchiveMemberError';
+    this.members = members;
+  }
+}
+
+/**
+ * Defensive member validation before extracting an archive. Our own backups
+ * can only contain relative members, but a planted or corrupted .mlbackup
+ * must never escape the destination directory: reject absolute paths
+ * (POSIX and Windows forms) and any `..` segment.
+ */
+export function assertSafeArchiveMembers(members: string[]): void {
+  const unsafe = members.filter((member) => {
+    const trimmed = member.trim();
+    if (trimmed.length === 0) {
+      return true;
+    }
+    if (isAbsolute(trimmed) || posix.isAbsolute(trimmed) || win32.isAbsolute(trimmed)) {
+      return true;
+    }
+    if (trimmed.includes('\0')) {
+      return true;
+    }
+    // Both separators: a member restored on another OS must not escape either.
+    return trimmed.split(/[\\/]/).some((segment) => segment === '..');
+  });
+  if (unsafe.length > 0) {
+    throw new UnsafeArchiveMemberError(unsafe);
+  }
 }

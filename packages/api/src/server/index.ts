@@ -143,7 +143,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     dataDir: options.dataDir,
     ...(options.backups?.keyHex !== undefined ? { keyHex: options.backups.keyHex } : {}),
     ...(options.backups?.keyFile !== undefined ? { keyFile: options.backups.keyFile } : {}),
-    ...(options.backups?.backupsDir !== undefined ? { backupsDir: options.backups.backupsDir } : {}),
+    ...(options.backups?.backupsDir !== undefined
+      ? { backupsDir: options.backups.backupsDir }
+      : {}),
     ...(options.backups?.retention !== undefined ? { retention: options.backups.retention } : {}),
     profiles: manager,
   });
@@ -186,14 +188,18 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     const created = await createApiToken(db, 'bootstrap');
     bootstrapToken = created.token;
     // eslint-disable-next-line no-console
-    console.log('[multiloger] No API tokens exist — bootstrap token (shown ONCE, protect your logs):');
+    console.log(
+      '[multiloger] No API tokens exist — bootstrap token (shown ONCE, protect your logs):',
+    );
     // eslint-disable-next-line no-console
     console.log(`[multiloger] ${bootstrapToken}`);
   }
 
   const routes: Route[] = buildRoutes();
   const authedLimiter = new TokenBucketLimiter(options.rateLimit ?? DEFAULT_RATE_LIMIT);
-  const anonymousLimiter = new TokenBucketLimiter(options.anonymousRateLimit ?? DEFAULT_ANONYMOUS_RATE_LIMIT);
+  const anonymousLimiter = new TokenBucketLimiter(
+    options.anonymousRateLimit ?? DEFAULT_ANONYMOUS_RATE_LIMIT,
+  );
   const hub = new WsHub();
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -206,27 +212,30 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       const ms = Date.now() - startedAt;
       // Redacted by construction: no headers, no bodies, token id only.
       // eslint-disable-next-line no-console
-      console.log(`[multiloger] ${method} ${url.pathname} -> ${String(status)} ${String(ms)}ms ${logToken}`);
+      console.log(
+        `[multiloger] ${method} ${url.pathname} -> ${String(status)} ${String(ms)}ms ${logToken}`,
+      );
     };
 
     try {
       const matched = matchRoute(routes, method, url.pathname);
       if (!matched) {
-        if (
-          options.webDir !== undefined &&
-          (method === 'GET' || method === 'HEAD')
-        ) {
+        if (options.webDir !== undefined && (method === 'GET' || method === 'HEAD')) {
           const resolved = resolveStaticFile(options.webDir, url.pathname);
           if (resolved) {
             const found = await findStaticFile(options.webDir, resolved);
             if (found) {
-              await serveStaticFile(res, found);
+              await serveStaticFile(res, found, method === 'HEAD');
               finish(res.statusCode);
               return;
             }
           }
         }
-        const { status, body } = httpErrorBody(404, 'NOT_FOUND', `No route: ${method} ${url.pathname}`);
+        const { status, body } = httpErrorBody(
+          404,
+          'NOT_FOUND',
+          `No route: ${method} ${url.pathname}`,
+        );
         sendJson(res, status, body);
         finish(status);
         return;
@@ -283,7 +292,10 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         return;
       }
 
-      const body = method === 'POST' || method === 'PATCH' || method === 'PUT' ? await readJsonBody(req) : undefined;
+      const body =
+        method === 'POST' || method === 'PATCH' || method === 'PUT'
+          ? await readJsonBody(req)
+          : undefined;
       const ctx: RouteContext = {
         req,
         res,
@@ -309,7 +321,10 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       }
       finish(status);
       if (status === 500) {
-        console.error('[multiloger] internal error:', error instanceof Error ? error.stack ?? error.message : error);
+        console.error(
+          '[multiloger] internal error:',
+          error instanceof Error ? (error.stack ?? error.message) : error,
+        );
       }
     }
   }
@@ -318,10 +333,13 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     void handleRequest(req, res);
   });
 
-  hub.attach(() => httpServer, async (presented: string) => {
-    const token = await authenticateRequest(db, `Bearer ${presented}`);
-    return token ? token.id : null;
-  });
+  hub.attach(
+    () => httpServer,
+    async (presented: string) => {
+      const token = await authenticateRequest(db, `Bearer ${presented}`);
+      return token ? token.id : null;
+    },
+  );
   hub.startHeartbeat();
 
   const offEvents = profileEvents.on((event) => {
@@ -353,8 +371,8 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     await manager.shutdown();
     await new Promise<void>((resolve) => {
       httpServer.close(() => {
-      resolve();
-    });
+        resolve();
+      });
     });
     await closeDatabase(db);
   }

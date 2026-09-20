@@ -38,7 +38,7 @@ import {
   resolveBackupKey,
   type KeySource,
 } from './crypto.js';
-import { createTar, extractTar, listTar } from './tar.js';
+import { createTar, extractTar, listTar, assertSafeArchiveMembers } from './tar.js';
 
 export { BackupCorruptError } from './crypto.js';
 
@@ -187,19 +187,26 @@ export class BackupService {
       renameSync(outTmp, this.filePath(id));
 
       const createdAt = new Date().toISOString();
-      await this.db
-        .insertInto('backups')
-        .values({
-          id,
-          profile_id: profileId,
-          file_name: `${id}.mlbackup`,
-          size_bytes: blob.length,
-          sha256,
-          encryption: BACKUP_ENCRYPTION,
-          created_at: createdAt,
-        })
-        .execute();
-      await this.enforceRetention(profileId);
+      try {
+        await this.db
+          .insertInto('backups')
+          .values({
+            id,
+            profile_id: profileId,
+            file_name: `${id}.mlbackup`,
+            size_bytes: blob.length,
+            sha256,
+            encryption: BACKUP_ENCRYPTION,
+            created_at: createdAt,
+          })
+          .execute();
+        await this.enforceRetention(profileId);
+      } catch (error) {
+        // The encrypted blob is already at its final path: remove it so a
+        // failed insert never leaves an unreferenced file behind.
+        rmSync(this.filePath(id), { force: true });
+        throw error;
+      }
       return {
         id,
         profileId,
@@ -257,7 +264,10 @@ export class BackupService {
 
   /**
    * Restore a backup into a brand-new profile (new id, fresh lock state,
-   * no proxy assignment carried over). The source profile is untouched.
+   * no proxy assignment carried over). The source profile is untouched — and
+   * it does not even need to exist: backup rows intentionally carry no
+   * foreign key to profiles, so backups survive profile deletion. In that
+   * case an explicit clientId is required.
    */
   async restoreBackup(
     backupId: string,
@@ -268,8 +278,11 @@ export class BackupService {
     if (name.length === 0 || name.length > 200) {
       throw new Error('Profile name must be 1-200 characters');
     }
-    const source = await getProfile(this.db, row.profile_id);
-    const clientId = input.clientId ?? source.client_id;
+    const source = await getProfile(this.db, row.profile_id).catch(() => null);
+    const clientId = input.clientId ?? source?.client_id ?? null;
+    if (clientId === null) {
+      throw new Error('clientId is required: the source profile no longer exists');
+    }
     await getClient(this.db, clientId);
     const key = resolveBackupKey(this.keySource);
 
@@ -284,10 +297,17 @@ export class BackupService {
     try {
       const tmpTar = join(tmpDir, 'backup.tar.gz');
       writeFileSync(tmpTar, tarBytes);
+      // Defense in depth: a planted/corrupt archive must never write outside
+      // the new profile's directory.
+      assertSafeArchiveMembers(await listTar(tmpTar));
       await extractTar(tmpTar, profile.user_data_dir);
     } catch (error) {
       // Best-effort rollback: don't leave a half-restored profile behind.
-      await this.db.deleteFrom('profiles').where('id', '=', profile.id).execute().catch(() => undefined);
+      await this.db
+        .deleteFrom('profiles')
+        .where('id', '=', profile.id)
+        .execute()
+        .catch(() => undefined);
       rmSync(profile.user_data_dir, { recursive: true, force: true });
       throw error;
     } finally {
@@ -304,8 +324,10 @@ export class BackupService {
 
   async deleteBackup(backupId: string): Promise<void> {
     await this.backupRow(backupId);
-    rmSync(this.filePath(backupId), { force: true });
+    // DB row first: a crash between the two leaves at worst an unreferenced
+    // file (invisible, harmless), never a row pointing at a missing file.
     await this.db.deleteFrom('backups').where('id', '=', backupId).execute();
+    rmSync(this.filePath(backupId), { force: true });
   }
 
   /** Keep the newest `retention` backups per profile; delete the rest. */
@@ -320,8 +342,8 @@ export class BackupService {
       .orderBy('seq', 'desc')
       .execute();
     for (const extra of rows.slice(this.retention)) {
-      rmSync(this.filePath(extra.id), { force: true });
       await this.db.deleteFrom('backups').where('id', '=', extra.id).execute();
+      rmSync(this.filePath(extra.id), { force: true });
     }
   }
 }

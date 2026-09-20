@@ -4,6 +4,11 @@
  * `backups` records every .mlbackup file on disk. `seq` is an autoincrement
  * ordering key so retention ("keep newest N per profile") is deterministic
  * even when several backups share a created_at timestamp.
+ *
+ * Intentional: `profile_id` has NO foreign key to `profiles`. Backups are
+ * disaster-recovery artifacts — they must survive the deletion of the
+ * profile they were taken from, and restore() works without the source
+ * profile (an explicit clientId is required in that case).
  */
 
 import type { Kysely } from 'kysely';
@@ -25,7 +30,11 @@ export const backups: Migration = {
       .addColumn('encryption', 'text', (col) => col.notNull())
       .addColumn('created_at', 'text', (col) => col.notNull())
       .execute();
-    await db.schema.createIndex('idx_backups_profile_id').on('backups').column('profile_id').execute();
+    await db.schema
+      .createIndex('idx_backups_profile_id')
+      .on('backups')
+      .column('profile_id')
+      .execute();
   },
 
   async down(db: Kysely<DatabaseSchema>): Promise<void> {

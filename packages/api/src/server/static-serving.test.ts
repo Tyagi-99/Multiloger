@@ -6,7 +6,7 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { get as httpGet } from 'node:http';
+import { get as httpGet, request as httpRequest } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startServer, type RunningServer } from './index.js';
 
@@ -39,6 +39,29 @@ async function get(
       },
     );
     req.on('error', reject);
+  });
+}
+
+async function headRequest(
+  path: string,
+): Promise<{ status: number; body: string; contentLength: string }> {
+  return new Promise((resolvePromise, reject) => {
+    const req = httpRequest(`${base}${path}`, { method: 'HEAD' }, (res) => {
+      let body = '';
+      res.on('data', (chunk: Buffer) => {
+        body += chunk.toString();
+      });
+      res.on('end', (): void => {
+        const contentLength = res.headers['content-length'];
+        resolvePromise({
+          status: res.statusCode ?? 0,
+          body,
+          contentLength: typeof contentLength === 'string' ? contentLength : '',
+        });
+      });
+    });
+    req.on('error', reject);
+    req.end();
   });
 }
 
@@ -90,5 +113,13 @@ describe('dashboard static serving', () => {
     const res = await get('/v1/nope', server.bootstrapToken ?? '');
     expect(res.status).toBe(404);
     expect(res.body).toContain('NOT_FOUND');
+  });
+
+  it('answers HEAD with headers and no body', async () => {
+    const headRes = await headRequest('/assets/app.js');
+    const got = await get('/assets/app.js', null);
+    expect(headRes.status).toBe(200);
+    expect(headRes.body).toBe('');
+    expect(headRes.contentLength).toBe(String(Buffer.byteLength(got.body)));
   });
 });

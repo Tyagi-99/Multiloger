@@ -12,7 +12,7 @@
  * resolves to null (the router then answers 404).
  */
 
-import { createReadStream, promises as fs } from 'node:fs';
+import { createReadStream, promises as fs, statSync } from 'node:fs';
 import { join, normalize, resolve, sep } from 'node:path';
 import type { ServerResponse } from 'node:http';
 
@@ -83,7 +83,11 @@ export async function findStaticFile(
   try {
     const stat = await fs.stat(resolved.filePath);
     if (!stat.isDirectory()) {
-      return { filePath: resolved.filePath, contentType: extOf(resolved.filePath), fallback: false };
+      return {
+        filePath: resolved.filePath,
+        contentType: extOf(resolved.filePath),
+        fallback: false,
+      };
     }
   } catch {
     // Fall through to the SPA fallback.
@@ -104,11 +108,18 @@ export async function findStaticFile(
 export async function serveStaticFile(
   res: ServerResponse,
   found: { filePath: string; contentType: string; fallback: boolean },
+  headOnly = false,
 ): Promise<void> {
+  const size = statSync(found.filePath).size;
   res.writeHead(200, {
     'content-type': found.contentType,
+    'content-length': String(size),
     'cache-control': found.fallback ? 'no-cache' : 'public, max-age=3600',
   });
+  if (headOnly) {
+    res.end();
+    return;
+  }
   await new Promise<void>((resolvePromise, reject) => {
     const stream = createReadStream(found.filePath);
     stream.on('error', reject);
