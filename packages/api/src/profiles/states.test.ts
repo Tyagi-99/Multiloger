@@ -42,7 +42,9 @@ describe('transition table', () => {
         if (canTransition(from, to)) {
           legalCount++;
         } else {
-          expect(() => assertTransition(from, to)).toThrow(IllegalTransitionError);
+          expect(() => {
+            assertTransition(from, to);
+          }).toThrow(IllegalTransitionError);
           try {
             assertTransition(from, to);
           } catch (error) {
