@@ -4,16 +4,18 @@
  *
  * Rules:
  * - `proxy_required` + no assigned proxy            → ProxyRequiredError
+ * - assigned proxy has any credentials configured    → ProxyAuthUnsupportedError
+ *   (username and/or password_secret_ref — the MVP cannot apply proxy
+ *   authentication, so launching would silently send traffic unauthenticated)
  * - assigned proxy fails the TCP health check       → ProxyUnhealthyError
  *   (this applies even when the proxy is not "required": launching through
  *   a dead proxy would silently expose the real IP, so we refuse instead)
  * - no assignment and not required                  → undefined (direct)
  *
- * Credentials: resolved from `password_secret_ref` (`env:VAR`) at launch
- * time. They are returned to the caller but MUST never be logged — the
- * manager logs only a warning that MVP proxy auth is not applied (Chromium
- * ignores inline proxy credentials; applying them needs a CDP
- * Fetch.continueWithAuth handler, which is deferred and tracked).
+ * Credentials: resolved from `password_secret_ref` (`env:VAR`) by
+ * resolveProxyCredentials (kept as the seam for future authenticated-proxy
+ * support). They are never logged. The launch gate refuses credentialed
+ * proxies outright — see ProxyAuthUnsupportedError.
  */
 
 import type { Kysely } from 'kysely';
@@ -53,6 +55,27 @@ export class ProxyCredentialError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ProxyCredentialError';
+  }
+}
+
+/**
+ * Fail-closed refusal: the proxy has credentials configured (username and/or
+ * password_secret_ref), but this build cannot apply proxy authentication —
+ * Chromium ignores inline proxy credentials and the CDP
+ * Fetch.continueWithAuth handler is not implemented. Launching anyway would
+ * silently send traffic without authentication, so the launch is refused.
+ * Remove the credentials from the proxy (or wait for authenticated-proxy
+ * support) to launch through it.
+ */
+export class ProxyAuthUnsupportedError extends Error {
+  readonly code = 'PROXY_AUTH_UNSUPPORTED';
+  constructor(readonly proxyId: string) {
+    super(
+      `Proxy ${proxyId} has credentials configured, but proxy authentication ` +
+        'is not supported in this build — launch refused rather than sending ' +
+        'traffic unauthenticated',
+    );
+    this.name = 'ProxyAuthUnsupportedError';
   }
 }
 
@@ -112,19 +135,21 @@ export async function resolveProxyForLaunch(
     return undefined;
   }
 
+  // Fail closed: any configured credential material (username and/or
+  // password_secret_ref) signals intended authentication, which this build
+  // cannot apply — Chromium ignores inline proxy credentials and the CDP
+  // Fetch.continueWithAuth handler is not implemented. Refuse rather than
+  // launch unauthenticated. A dangling password_secret_ref surfaces as
+  // ProxyCredentialError from resolveProxyCredentials — also a refusal,
+  // never a silent launch.
+  const credentials = resolveProxyCredentials(assigned);
+  if (credentials !== undefined || (assigned.username ?? '').length > 0) {
+    throw new ProxyAuthUnsupportedError(assigned.id);
+  }
+
   const health = await checkProxyHealth(assigned.host, assigned.port, healthTimeoutMs);
   if (!health.ok) {
     throw new ProxyUnhealthyError(assigned.id, health);
-  }
-
-  const credentials = resolveProxyCredentials(assigned);
-  if (credentials) {
-    // Honest MVP limitation, logged without the secret.
-    console.warn(
-      `[multiloger] proxy "${assigned.name}" has credentials configured, ` +
-        'but Chromium proxy authentication (CDP Fetch.continueWithAuth) is not ' +
-        'implemented in the MVP — launching WITHOUT proxy authentication',
-    );
   }
 
   const flags: ProxyFlagOptions = {

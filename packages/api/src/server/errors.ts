@@ -22,6 +22,7 @@ import { ClientNotFoundError } from '../profiles/repository.js';
 import { IllegalTransitionError } from '../profiles/states.js';
 import { InvalidSecretRefError, ProxyNotFoundError } from '../proxies/repository.js';
 import {
+  ProxyAuthUnsupportedError,
   ProxyCredentialError,
   ProxyRequiredError,
   ProxyUnhealthyError,
@@ -123,6 +124,11 @@ export function toHttpError(error: unknown): MappedError {
   }
   if (error instanceof ProxyCredentialError) {
     return mapped(500, 'PROXY_CREDENTIAL_ERROR', error.message);
+  }
+  if (error instanceof ProxyAuthUnsupportedError) {
+    // The launch is refused because credentials are configured but cannot be
+    // applied — a conflict between the request and the proxy's state.
+    return mapped(409, 'PROXY_AUTH_UNSUPPORTED', error.message);
   }
   if (error instanceof InvalidSecretRefError) {
     return mapped(400, 'INVALID_SECRET_REF', error.message);

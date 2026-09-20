@@ -18,6 +18,7 @@ import {
   setProxyRequired,
 } from './repository.js';
 import {
+  ProxyAuthUnsupportedError,
   ProxyCredentialError,
   ProxyRequiredError,
   ProxyUnhealthyError,
@@ -136,12 +137,30 @@ describe('proxy launch gate', () => {
 
     process.env.TEST_PROXY_PASSWORD = 'hunter2';
     expect(resolveProxyCredentials(proxy)).toEqual({ username: 'alice', password: 'hunter2' });
-    // Launch proceeds (with the documented no-auth-applied warning).
-    const flags = await resolveProxyForLaunch(db, profileId, 2000);
-    expect(flags?.host).toBe('127.0.0.1');
+    // Credentials resolve — but the MVP cannot apply proxy authentication, so
+    // the launch gate fails closed instead of launching unauthenticated.
+    await expect(resolveProxyForLaunch(db, profileId, 2000)).rejects.toThrow(ProxyAuthUnsupportedError);
 
     delete process.env.TEST_PROXY_PASSWORD;
     expect(() => resolveProxyCredentials(proxy)).toThrow(ProxyCredentialError);
+  });
+
+  it('refuses launch when only a username is configured (no secret ref)', async () => {
+    fixture = await setup();
+    const { db, profileId } = fixture;
+    const port = await dummyProxy();
+    const proxy = await createProxy(db, {
+      name: 'user-only',
+      scheme: 'http',
+      host: '127.0.0.1',
+      port,
+      username: 'alice',
+    });
+    await assignProxyToProfile(db, profileId, proxy.id);
+
+    // A username signals intended authentication; launching without applying
+    // it would silently send traffic unauthenticated — refuse instead.
+    await expect(resolveProxyForLaunch(db, profileId, 2000)).rejects.toThrow(ProxyAuthUnsupportedError);
   });
 
   it('blocks a manager launch fail-closed: state error, lock released, nothing spawned', async () => {
@@ -163,6 +182,40 @@ describe('proxy launch gate', () => {
       expect((await getLockInfo(db, profileId, 10_000)).active).toBe(false);
       expect(manager.isLive(profileId)).toBe(false);
     } finally {
+      await manager.shutdown();
+    }
+  }, 60_000);
+
+  it('blocks a manager launch when the proxy has credentials: nothing spawned', async () => {
+    fixture = await setup();
+    const { db, dir, profileId } = fixture;
+    const port = await dummyProxy();
+    process.env.TEST_PROXY_PASSWORD = 'hunter2';
+    const proxy = await createProxy(db, {
+      name: 'auth',
+      scheme: 'http',
+      host: '127.0.0.1',
+      port,
+      username: 'alice',
+      passwordSecretRef: 'env:TEST_PROXY_PASSWORD',
+    });
+    await assignProxyToProfile(db, profileId, proxy.id);
+
+    const manager = new ProfileManager(db, {
+      dataDir: dir,
+      lockTtlMs: 10_000,
+      resolveProxy: (id) => resolveProxyForLaunch(db, id, 2000),
+    });
+    manager.start();
+    try {
+      // Fail closed: the launch is refused BEFORE Chromium spawns, because
+      // proxy authentication cannot be applied in this build.
+      await expect(manager.launchProfile(profileId)).rejects.toThrow(ProxyAuthUnsupportedError);
+      expect(await getState(db, profileId)).toBe('error');
+      expect((await getLockInfo(db, profileId, 10_000)).active).toBe(false);
+      expect(manager.isLive(profileId)).toBe(false);
+    } finally {
+      delete process.env.TEST_PROXY_PASSWORD;
       await manager.shutdown();
     }
   }, 60_000);

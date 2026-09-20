@@ -363,6 +363,45 @@ describe('API server (live)', () => {
     expect(deleted.status).toBe(200);
   });
 
+  it('refuses launch with 409 PROXY_AUTH_UNSUPPORTED for a credentialed proxy', async () => {
+    // Separate profile so the shared one keeps its lifecycle intact.
+    const created = await api<{ profile: ProfileDetail }>('POST', '/v1/profiles', userToken, {
+      clientId,
+      name: 'auth-proxy-profile',
+    });
+    expect(created.status).toBe(201);
+    const pId = created.json.profile.id;
+
+    // Env var set: credentials fully resolve, so the refusal is specifically
+    // PROXY_AUTH_UNSUPPORTED (unset would be PROXY_CREDENTIAL_ERROR instead).
+    process.env.TEST_PROXY_PASSWORD = 'hunter2';
+    try {
+      const proxy = await api<{ proxy: PublicProxyShape }>('POST', '/v1/proxies', userToken, {
+        name: 'auth-proxy',
+        scheme: 'http',
+        host: '127.0.0.1',
+        port: 9,
+        username: 'u',
+        passwordSecretRef: 'env:TEST_PROXY_PASSWORD',
+      });
+      expect(proxy.status).toBe(201);
+
+      const assigned = await api<{ profile: ProfileDetail }>(
+        'POST',
+        `/v1/profiles/${pId}/proxy`,
+        userToken,
+        { proxyId: proxy.json.proxy.id },
+      );
+      expect(assigned.status).toBe(200);
+
+      const refused = await api<ErrorBody>('POST', `/v1/profiles/${pId}/launch`, userToken);
+      expect(refused.status).toBe(409);
+      expect(refused.json.error.code).toBe('PROXY_AUTH_UNSUPPORTED');
+    } finally {
+      delete process.env.TEST_PROXY_PASSWORD;
+    }
+  });
+
   it('stops the profile and reports readiness honestly', async () => {
     const readiness = await api<{ ready: boolean; reason?: string }>(
       'GET',

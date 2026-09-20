@@ -217,7 +217,9 @@ export function ProxiesPage({ client }: { client: ApiClient }): React.JSX.Elemen
               <input className={inputClass} value={form.bypass} onChange={set('bypass')} maxLength={500} />
             </Field>
             <p className="text-xs text-zinc-500">
-              Credentials are stored server-side and never displayed again.
+              Credentials are stored server-side and never displayed again. Note:
+              proxy authentication is not supported in this build — a proxy with
+              credentials configured will refuse launches (fail-closed).
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={(): void => {
