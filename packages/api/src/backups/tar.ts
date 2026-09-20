@@ -56,7 +56,10 @@ export async function createTar(sourceDir: string, outPath: string): Promise<voi
 /** Extract a gzip tar archive into destDir (created if needed). */
 export async function extractTar(archivePath: string, destDir: string): Promise<void> {
   mkdirSync(destDir, { recursive: true, mode: 0o700 });
-  await runTar(['-xzf', archivePath, '-C', destDir]);
+  // --no-same-owner: never try to restore the archived uid/gid. As root tar
+  // would otherwise attempt chown (failing in restricted environments), and
+  // a restored profile must belong to the Multiloger operator in any case.
+  await runTar(['-xzf', archivePath, '--no-same-owner', '-C', destDir]);
 }
 
 /** List member names of a gzip tar archive (for verify, without extracting). */

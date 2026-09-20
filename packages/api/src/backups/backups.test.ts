@@ -4,6 +4,7 @@
  */
 
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
@@ -149,6 +150,26 @@ describe('tar with cache exclusions', () => {
     const dir = mkdtempSync(join(tmpdir(), 'multiloger-tar-'));
     try {
       await expect(createTar(join(dir, 'nope'), join(dir, 'o.tar.gz'))).rejects.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('extracts archives with foreign uid/gid without attempting chown', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'multiloger-tar-'));
+    try {
+      const src = join(dir, 'src');
+      mkdirSync(src, { recursive: true });
+      writeFileSync(join(src, 'data.txt'), 'hello');
+      // Archive the file as if owned by another user.
+      const archive = join(dir, 'foreign.tar.gz');
+      execFileSync('tar', ['-czf', archive, '--owner=65534', '--group=65534', '-C', src, '.']);
+      const dest = join(dir, 'restored');
+      await extractTar(archive, dest); // must not throw EPERM-chown
+      expect(readFileSync(join(dest, 'data.txt'), 'utf8')).toBe('hello');
+      // Restored files belong to the extracting user, not the archived uid.
+      const me = typeof process.getuid === 'function' ? process.getuid() : 0;
+      expect(statSync(join(dest, 'data.txt')).uid).toBe(me);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
