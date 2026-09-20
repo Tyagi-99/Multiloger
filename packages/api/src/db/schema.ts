@@ -102,9 +102,117 @@ export interface ApiTokensTable {
   salt: string;
   /** Hex-encoded scrypt key. */
   hash: string;
+  /**
+   * Attributed user id (Phase 3). NULL = legacy token: grandfathered with
+   * full access, exactly like before Phase 3.
+   */
+  user_id: string | null;
+  /**
+   * JSON array of permission keys narrowing this token. NULL = no
+   * narrowing; otherwise effective permissions are role-permissions ∩
+   * scopes (scopes can only ever remove, never add).
+   */
+  scopes: string | null;
+  /** Id of the API token that issued this one; null for bootstrap/legacy. */
+  created_by: string | null;
   created_at: string;
   last_used_at: string | null;
   revoked_at: string | null;
+}
+
+/** Team member. Passwords are scrypt hashes — never reversible. */
+export interface UsersTable {
+  id: string;
+  name: string;
+  email: string;
+  /** `scrypt$N$r$p$<saltHex>$<keyHex>` — see server/passwords.ts. */
+  password_hash: string;
+  /** 1 = login and token use rejected with 401. */
+  disabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RolesTable {
+  id: string;
+  name: string;
+  description: string | null;
+  /** 1 = seeded by migration 008 (admin/operator/viewer); cannot be deleted. */
+  seeded: number;
+  created_at: string;
+}
+
+export interface PermissionsTable {
+  /** The permission key itself, e.g. 'profiles:launch'. */
+  id: string;
+  key: string;
+  description: string | null;
+}
+
+export interface RolePermissionsTable {
+  role_id: string;
+  permission_id: string;
+}
+
+export interface UserRolesTable {
+  user_id: string;
+  role_id: string;
+  created_at: string;
+}
+
+/** Client scoping for non-admin users: no row = no access (deny by default). */
+export interface UserClientsTable {
+  user_id: string;
+  client_id: string;
+  created_at: string;
+}
+
+/** Profile scoping for non-admin users (in addition to client scoping). */
+export interface UserProfilesTable {
+  user_id: string;
+  profile_id: string;
+  created_at: string;
+}
+
+/**
+ * Single-use invitation. The plaintext invite token is shown to the
+ * inviting admin exactly once; only a scrypt hash + lookup prefix is
+ * stored. There is no email delivery — the admin passes the token
+ * out-of-band.
+ */
+export interface InvitationsTable {
+  id: string;
+  email: string;
+  role_id: string;
+  /** JSON array of client ids granted on redeem. */
+  client_ids: string;
+  /** JSON array of profile ids granted on redeem. */
+  profile_ids: string;
+  /** First 12 chars of the invite token ('mli_' + 8) — lookup key. */
+  prefix: string;
+  salt: string;
+  hash: string;
+  expires_at: string;
+  used_at: string | null;
+  /** API token id that created the invitation; null for unknown. */
+  created_by: string | null;
+  created_at: string;
+}
+
+/** Append-only record of mutating API calls. Never stores secrets or bodies. */
+export interface AuditLogTable {
+  id: string;
+  at: string;
+  /** 'user' | 'token' (legacy token) | 'anonymous' (public auth endpoints). */
+  actor_type: string;
+  actor_id: string | null;
+  /** e.g. 'profile.launch', 'user.create'. */
+  action: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  /** JSON object with safe context (route, params) — never request bodies. */
+  details_json: string | null;
+  ip: string | null;
 }
 
 export interface BackupsTable {
@@ -134,6 +242,15 @@ export interface DatabaseSchema {
   automation_scripts: AutomationScriptsTable;
   automation_jobs: AutomationJobsTable;
   automation_runs: AutomationRunsTable;
+  users: UsersTable;
+  roles: RolesTable;
+  permissions: PermissionsTable;
+  role_permissions: RolePermissionsTable;
+  user_roles: UserRolesTable;
+  user_clients: UserClientsTable;
+  user_profiles: UserProfilesTable;
+  invitations: InvitationsTable;
+  audit_log: AuditLogTable;
   _migrations: MigrationsTable;
 }
 

@@ -34,6 +34,11 @@ import {
   type ScriptSummary,
 } from '../automation/repository.js';
 import {
+  assertProfileAccess,
+  filterByProfileScope,
+  requireIdentity,
+} from './access.js';
+import {
   defineRoute,
   getStringField,
   requireObjectBody,
@@ -114,6 +119,7 @@ async function createScriptRoute(ctx: RouteContext): Promise<void> {
     steps: body.steps,
     ...(createdBy !== undefined ? { createdBy } : {}),
   });
+  ctx.auditEntityId = script.id;
   sendJson(ctx.res, 201, { script: publicScript(script) });
 }
 
@@ -129,6 +135,7 @@ async function createScriptVersionRoute(ctx: RouteContext): Promise<void> {
     steps: body.steps,
     ...(createdBy !== undefined ? { createdBy } : {}),
   });
+  ctx.auditEntityId = script.id;
   sendJson(ctx.res, 201, { script: publicScript(script) });
 }
 
@@ -189,6 +196,7 @@ async function createJobRoute(ctx: RouteContext): Promise<void> {
   // profile routes. Script existence is checked before profile liveness so
   // a bad script id reports SCRIPT_NOT_FOUND even for a stopped profile.
   await getProfile(ctx.db, profileId ?? '');
+  await assertProfileAccess(ctx.db, requireIdentity(ctx), profileId ?? '');
   await getScript(ctx.db, scriptId ?? '', scriptVersion);
   // Fail fast on stopped profiles: a run could never execute, so queueing
   // it would only produce a confusing failure later.
@@ -205,17 +213,20 @@ async function createJobRoute(ctx: RouteContext): Promise<void> {
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
   });
   ctx.automation.enqueueRun(run.id);
+  ctx.auditEntityId = job.id;
   sendJson(ctx.res, 201, { job: publicJob(job), run: publicRun(run) });
 }
 
 async function listJobsRoute(ctx: RouteContext): Promise<void> {
   const jobs = await listJobs(ctx.db);
-  sendJson(ctx.res, 200, { jobs: jobs.map(publicJob) });
+  const visible = await filterByProfileScope(ctx.db, requireIdentity(ctx), jobs, (j) => j.profileId);
+  sendJson(ctx.res, 200, { jobs: visible.map(publicJob) });
 }
 
 async function getJobRoute(ctx: RouteContext): Promise<void> {
   const id = ctx.params.id ?? '';
   const job = await getJob(ctx.db, id);
+  await assertProfileAccess(ctx.db, requireIdentity(ctx), job.profileId);
   const runs = await listRunsForJob(ctx.db, id);
   sendJson(ctx.res, 200, { job: publicJob(job), runs: runs.map(publicRun) });
 }
@@ -224,6 +235,8 @@ async function cancelJobRoute(ctx: RouteContext): Promise<void> {
   const id = ctx.params.id ?? '';
   // listRunsForJob 404s on unknown jobs.
   const runs = await listRunsForJob(ctx.db, id);
+  const job = await getJob(ctx.db, id);
+  await assertProfileAccess(ctx.db, requireIdentity(ctx), job.profileId);
   let cancelledRuns = 0;
   for (const run of runs) {
     if (run.status === 'queued' || run.status === 'running') {
@@ -257,11 +270,13 @@ async function listRunsRoute(ctx: RouteContext): Promise<void> {
     ...(status !== undefined ? { status } : {}),
     limit,
   });
-  sendJson(ctx.res, 200, { runs: runs.map(publicRun) });
+  const visible = await filterByProfileScope(ctx.db, requireIdentity(ctx), runs, (r) => r.profileId);
+  sendJson(ctx.res, 200, { runs: visible.map(publicRun) });
 }
 
 async function getRunRoute(ctx: RouteContext): Promise<void> {
   const run = await getRun(ctx.db, ctx.params.id ?? '');
+  await assertProfileAccess(ctx.db, requireIdentity(ctx), run.profileId);
   sendJson(ctx.res, 200, { run: publicRun(run) });
 }
 
@@ -272,7 +287,8 @@ const ARTIFACT_NAME_PATTERN = /^[0-9]+\.png$/;
 async function getArtifactRoute(ctx: RouteContext): Promise<void> {
   const runId = ctx.params.id ?? '';
   const name = ctx.params.name ?? '';
-  await getRun(ctx.db, runId); // 404 when unknown
+  const run = await getRun(ctx.db, runId); // 404 when unknown
+  await assertProfileAccess(ctx.db, requireIdentity(ctx), run.profileId);
   if (!ARTIFACT_NAME_PATTERN.test(name)) {
     throw new InvalidArtifactNameError(name);
   }
@@ -324,16 +340,30 @@ async function getArtifactRoute(ctx: RouteContext): Promise<void> {
 
 export function buildAutomationRoutes(): Route[] {
   return [
-    defineRoute('POST', '/v1/automation/scripts', createScriptRoute),
-    defineRoute('POST', '/v1/automation/scripts/:id/versions', createScriptVersionRoute),
-    defineRoute('GET', '/v1/automation/scripts', listScriptsRoute),
-    defineRoute('GET', '/v1/automation/scripts/:id', getScriptRoute),
-    defineRoute('POST', '/v1/automation/jobs', createJobRoute),
-    defineRoute('GET', '/v1/automation/jobs', listJobsRoute),
-    defineRoute('GET', '/v1/automation/jobs/:id', getJobRoute),
-    defineRoute('POST', '/v1/automation/jobs/:id/cancel', cancelJobRoute),
-    defineRoute('GET', '/v1/automation/runs', listRunsRoute),
-    defineRoute('GET', '/v1/automation/runs/:id', getRunRoute),
-    defineRoute('GET', '/v1/automation/runs/:id/artifacts/:name', getArtifactRoute),
+    defineRoute('POST', '/v1/automation/scripts', createScriptRoute, {
+      permission: 'automation:scripts:manage',
+      audit: { action: 'automation.script.create', entity: 'automation_script' },
+    }),
+    defineRoute('POST', '/v1/automation/scripts/:id/versions', createScriptVersionRoute, {
+      permission: 'automation:scripts:manage',
+      audit: { action: 'automation.script.version', entity: 'automation_script' },
+    }),
+    defineRoute('GET', '/v1/automation/scripts', listScriptsRoute, { permission: 'automation:read' }),
+    defineRoute('GET', '/v1/automation/scripts/:id', getScriptRoute, { permission: 'automation:read' }),
+    defineRoute('POST', '/v1/automation/jobs', createJobRoute, {
+      permission: 'automation:run',
+      audit: { action: 'automation.job.create', entity: 'automation_job' },
+    }),
+    defineRoute('GET', '/v1/automation/jobs', listJobsRoute, { permission: 'automation:read' }),
+    defineRoute('GET', '/v1/automation/jobs/:id', getJobRoute, { permission: 'automation:read' }),
+    defineRoute('POST', '/v1/automation/jobs/:id/cancel', cancelJobRoute, {
+      permission: 'automation:run',
+      audit: { action: 'automation.job.cancel', entity: 'automation_job' },
+    }),
+    defineRoute('GET', '/v1/automation/runs', listRunsRoute, { permission: 'automation:read' }),
+    defineRoute('GET', '/v1/automation/runs/:id', getRunRoute, { permission: 'automation:read' }),
+    defineRoute('GET', '/v1/automation/runs/:id/artifacts/:name', getArtifactRoute, {
+      permission: 'automation:read',
+    }),
   ];
 }

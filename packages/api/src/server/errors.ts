@@ -47,6 +47,14 @@ import {
 } from '../backups/crypto.js';
 import { TokenNotFoundError } from './tokens.js';
 import { BodyTooLargeError, InvalidJsonError, ValidationError } from './router.js';
+import { ForbiddenError, IdentityRejectedError } from './access.js';
+import { InvalidCredentialsError } from './team-routes.js';
+import { RoleNotFoundError, UserNotFoundError } from './users.js';
+import {
+  InvitationExpiredError,
+  InvitationInvalidError,
+  InvitationNotFoundError,
+} from './invitations.js';
 
 export interface HttpErrorBody {
   error: {
@@ -88,6 +96,30 @@ export function toHttpError(error: unknown): MappedError {
   }
   if (error instanceof TokenNotFoundError) {
     return mapped(404, 'TOKEN_NOT_FOUND', error.message);
+  }
+  if (error instanceof IdentityRejectedError) {
+    return mapped(401, 'UNAUTHORIZED', error.message);
+  }
+  if (error instanceof InvalidCredentialsError) {
+    return mapped(401, 'INVALID_CREDENTIALS', error.message);
+  }
+  if (error instanceof ForbiddenError) {
+    return mapped(403, 'FORBIDDEN', error.message);
+  }
+  if (error instanceof UserNotFoundError) {
+    return mapped(404, 'USER_NOT_FOUND', error.message);
+  }
+  if (error instanceof RoleNotFoundError) {
+    return mapped(404, 'ROLE_NOT_FOUND', error.message);
+  }
+  if (error instanceof InvitationNotFoundError) {
+    return mapped(404, 'INVITATION_NOT_FOUND', error.message);
+  }
+  if (error instanceof InvitationExpiredError) {
+    return mapped(410, 'INVITATION_EXPIRED', error.message);
+  }
+  if (error instanceof InvitationInvalidError) {
+    return mapped(400, 'INVITATION_INVALID', error.message);
   }
   if (error instanceof RunNotFoundError) {
     return mapped(404, 'RUN_NOT_FOUND', error.message);

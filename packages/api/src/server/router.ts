@@ -11,6 +11,8 @@ import type { ResourceManager } from '../resources/manager.js';
 import type { BackupService } from '../backups/service.js';
 import type { AutomationRunner } from '../automation/runner.js';
 import type { ApiTokensTable } from './tokens.js';
+import type { Identity } from './access.js';
+import type { AuditActorType } from './audit.js';
 
 export interface RouteContext {
   req: IncomingMessage;
@@ -22,6 +24,24 @@ export interface RouteContext {
   body: unknown;
   /** The authenticated token. Always set: every route requires auth except /health and /v1/events. */
   token: ApiTokensTable | null;
+  /**
+   * Resolved RBAC identity (Phase 3). Set for every authenticated route;
+   * null on public routes.
+   */
+  identity: Identity | null;
+  /**
+   * Entity id for the audit entry. Handlers set this on creates (where the
+   * id isn't a path param); otherwise the audit writer falls back to
+   * params.id.
+   */
+  auditEntityId: string | null;
+  /**
+   * Override the audit actor (used by public auth endpoints, which have no
+   * identity). Defaults to the identity when unset.
+   */
+  auditActor: { type: AuditActorType; id: string | null } | null;
+  /** Client IP for the audit entry (from X-Forwarded-For or the socket). */
+  clientIp: string;
   db: Kysely<DatabaseSchema>;
   manager: ProfileManager;
   /** Base directory under which profile user-data dirs live. */
@@ -38,6 +58,23 @@ export interface RouteContext {
 
 export type RouteHandler = (ctx: RouteContext) => Promise<void>;
 
+/** Audit config: written to audit_log after the handler succeeds. */
+export interface RouteAuditConfig {
+  /** e.g. 'profile.launch'. */
+  action: string;
+  /** e.g. 'profile'. */
+  entity: string;
+}
+
+export interface RouteOptions {
+  /** false only for public routes (/health, login, invite redeem). Default true. */
+  auth?: boolean;
+  /** Permission key the identity must hold. Undefined = any authenticated token. */
+  permission?: string;
+  /** Audit entry written after the handler succeeds (mutating routes). */
+  audit?: RouteAuditConfig;
+}
+
 export interface Route {
   method: string;
   template: string;
@@ -45,6 +82,10 @@ export interface Route {
   paramNames: string[];
   /** false only for /health and the WebSocket upgrade path. */
   auth: boolean;
+  /** Permission key the identity must hold (undefined = any authenticated). */
+  permission?: string;
+  /** Audit entry written after the handler succeeds (mutating routes). */
+  audit?: RouteAuditConfig;
   handler: RouteHandler;
 }
 
@@ -52,7 +93,7 @@ export function defineRoute(
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   template: string,
   handler: RouteHandler,
-  auth = true,
+  opts: RouteOptions = {},
 ): Route {
   const paramNames: string[] = [];
   const source = template
@@ -65,7 +106,16 @@ export function defineRoute(
       return segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     })
     .join('/');
-  return { method, template, pattern: new RegExp(`^${source}$`), paramNames, auth, handler };
+  return {
+    method,
+    template,
+    pattern: new RegExp(`^${source}$`),
+    paramNames,
+    auth: opts.auth ?? true,
+    ...(opts.permission !== undefined ? { permission: opts.permission } : {}),
+    ...(opts.audit !== undefined ? { audit: opts.audit } : {}),
+    handler,
+  };
 }
 
 export function matchRoute(
@@ -163,6 +213,21 @@ export function requireObjectBody(body: unknown): Record<string, unknown> {
     throw new InvalidJsonError();
   }
   return body as Record<string, unknown>;
+}
+
+/** Assert the field is an array of strings; undefined when absent. */
+export function getStringArrayField(
+  body: Record<string, unknown>,
+  field: string,
+): string[] | undefined {
+  const value = body[field];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value) || !value.every((entry): entry is string => typeof entry === 'string')) {
+    throw new ValidationError(`Field must be an array of strings: ${field}`);
+  }
+  return value;
 }
 
 export function getStringField(

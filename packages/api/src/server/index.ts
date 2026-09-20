@@ -32,6 +32,8 @@ import { resolveVaultPath } from '../vault/index.js';
 import { automationEvents } from '../automation/events.js';
 import { AutomationRunner } from '../automation/runner.js';
 import { authenticateRequest, createApiToken } from './tokens.js';
+import { requirePermission, resolveIdentity, type Identity } from './access.js';
+import { recordAudit } from './audit.js';
 import { TokenBucketLimiter, type RateLimitOptions } from './rateLimit.js';
 import { buildRoutes } from './routes.js';
 import { httpErrorBody, toHttpError } from './errors.js';
@@ -280,13 +282,30 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
           finish(429);
           return;
         }
+        const methodAllowsBody = method === 'POST' || method === 'PATCH' || method === 'PUT';
+        const hasBody = methodAllowsBody && req.headers['content-type'] !== undefined;
+        let publicBody: unknown;
+        if (hasBody) {
+          try {
+            publicBody = await readJsonBody(req);
+          } catch (error) {
+            const { status, body } = toHttpError(error);
+            sendJson(res, status, body);
+            finish(status);
+            return;
+          }
+        }
         const ctx: RouteContext = {
           req,
           res,
           params,
           query: url.searchParams,
-          body: undefined,
+          body: publicBody,
           token: null,
+          identity: null,
+          auditEntityId: null,
+          auditActor: null,
+          clientIp: clientIp(req),
           db,
           manager,
           dataDir: options.dataDir,
@@ -296,6 +315,19 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
           automation,
         };
         await route.handler(ctx);
+        // Public mutating routes (login, invite redeem) also audit.
+        if (route.audit !== undefined) {
+          const actor = ctx.auditActor ?? { type: 'anonymous' as const, id: null };
+          await recordAudit(db, {
+            actorType: actor.type,
+            actorId: actor.id,
+            action: route.audit.action,
+            entityType: route.audit.entity,
+            entityId: ctx.auditEntityId ?? params.id ?? null,
+            details: { route: route.template },
+            ip: clientIp(req),
+          });
+        }
         finish(res.statusCode);
         return;
       }
@@ -311,6 +343,32 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         return;
       }
       tokenIdForLog = `token=${token.id}`;
+
+      // Phase 3: resolve the RBAC identity. Legacy tokens (no user_id) are
+      // grandfathered with full access; tokens of disabled/deleted users
+      // are rejected here (fail closed → 401).
+      let identity: Identity;
+      try {
+        identity = await resolveIdentity(db, token);
+      } catch (error) {
+        const { status, body } = toHttpError(error);
+        sendJson(res, status, body);
+        finish(status);
+        return;
+      }
+
+      // Route-level permission gate (Phase 3). Checked before the handler
+      // runs; handlers add finer client/profile scoping themselves.
+      if (route.permission !== undefined) {
+        try {
+          requirePermission(identity, route.permission);
+        } catch (error) {
+          const { status, body } = toHttpError(error);
+          sendJson(res, status, body);
+          finish(status);
+          return;
+        }
+      }
 
       const rateKey = `token:${token.id}`;
       if (!authedLimiter.take(rateKey)) {
@@ -333,6 +391,10 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         query: url.searchParams,
         body,
         token,
+        identity,
+        auditEntityId: null,
+        auditActor: null,
+        clientIp: clientIp(req),
         db,
         manager,
         dataDir: options.dataDir,
@@ -342,6 +404,23 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         automation,
       };
       await route.handler(ctx);
+      // Phase 3: every mutating route with an audit config records an entry
+      // AFTER the handler succeeds. Never includes request bodies or secrets.
+      if (route.audit !== undefined) {
+        const actor = ctx.auditActor ?? {
+          type: identity.kind === 'user' ? ('user' as const) : ('token' as const),
+          id: identity.userId ?? identity.tokenId,
+        };
+        await recordAudit(db, {
+          actorType: actor.type,
+          actorId: actor.id,
+          action: route.audit.action,
+          entityType: route.audit.entity,
+          entityId: ctx.auditEntityId ?? params.id ?? null,
+          details: { route: route.template },
+          ip: clientIp(req),
+        });
+      }
       finish(res.statusCode);
     } catch (error) {
       const { status, body } = toHttpError(error);
