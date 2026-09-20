@@ -91,11 +91,26 @@ export interface ProfileProxyAssignmentsTable {
   created_at: string;
 }
 
+export interface ApiTokensTable {
+  id: string;
+  name: string;
+  /** First 12 chars of the token ('mlt_' + 8) — lookup key, not a secret. */
+  prefix: string;
+  /** Hex-encoded scrypt salt. */
+  salt: string;
+  /** Hex-encoded scrypt key. */
+  hash: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
 export interface DatabaseSchema {
   clients: ClientsTable;
   profiles: ProfilesTable;
   sessions: SessionsTable;
   proxies: ProxiesTable;
   profile_proxy_assignments: ProfileProxyAssignmentsTable;
+  api_tokens: ApiTokensTable;
   _migrations: MigrationsTable;
 }

@@ -59,9 +59,15 @@ describe('migration runner', () => {
     db = openDatabase({ path: join(dir, 'test.db') });
 
     await migrateToLatest(db);
-    expect(await migrateDown(db, 1)).toEqual(['003-proxies']);
+    expect(await migrateDown(db, 1)).toEqual(['004-api-tokens']);
 
     let tables = await tableNames(db);
+    expect(tables).not.toContain('api_tokens');
+    expect(tables).toContain('proxies');
+    expect(tables).toContain('profile_proxy_assignments');
+
+    expect(await migrateDown(db, 1)).toEqual(['003-proxies']);
+    tables = await tableNames(db);
     expect(tables).not.toContain('proxies');
     expect(tables).not.toContain('profile_proxy_assignments');
     expect(tables).toContain('sessions');
@@ -80,7 +86,7 @@ describe('migration runner', () => {
     expect(journal).toEqual([]);
 
     // and the schema can be re-applied cleanly afterwards
-    expect(await migrateToLatest(db)).toEqual(['001-baseline', '002-sessions', '003-proxies']);
+    expect(await migrateToLatest(db)).toEqual(['001-baseline', '002-sessions', '003-proxies', '004-api-tokens']);
   });
 
   it('rejects invalid step counts', async () => {
