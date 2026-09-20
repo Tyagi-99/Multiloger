@@ -1,0 +1,23 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# pnpm
+.pnpm-store/
+
+# env / secrets — never commit
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/*
+
+# profile data and runtime state (created at runtime, never committed)
+data/
+*.db
+*.db-*
