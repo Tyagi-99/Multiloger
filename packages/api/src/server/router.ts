@@ -8,6 +8,7 @@ import type { Kysely } from 'kysely';
 import type { DatabaseSchema } from '../db/schema.js';
 import type { ProfileManager } from '../profiles/manager.js';
 import type { ResourceManager } from '../resources/manager.js';
+import type { BackupService } from '../backups/service.js';
 import type { ApiTokensTable } from './tokens.js';
 
 export interface RouteContext {
@@ -28,6 +29,8 @@ export interface RouteContext {
   lockTtlMs: number;
   /** Resource governor (Task 8); undefined when not configured. */
   resources: ResourceManager | undefined;
+  /** Encrypted backup service (Task 9). */
+  backups: BackupService;
 }
 
 export type RouteHandler = (ctx: RouteContext) => Promise<void>;

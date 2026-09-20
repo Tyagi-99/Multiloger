@@ -7,6 +7,8 @@
  * - Nullable columns use `| null`; NOT NULL columns are non-optional.
  */
 
+import type { Generated } from 'kysely';
+
 export interface ClientsTable {
   id: string;
   name: string;
@@ -105,6 +107,22 @@ export interface ApiTokensTable {
   revoked_at: string | null;
 }
 
+export interface BackupsTable {
+  /** Autoincrement ordering key; makes retention deterministic. */
+  seq: Generated<number>;
+  /** Public UUID, also the file stem (<id>.mlbackup). */
+  id: string;
+  /** Source profile at backup time. */
+  profile_id: string;
+  file_name: string;
+  size_bytes: number;
+  /** Hex SHA-256 of the plaintext (pre-encryption) tarball. */
+  sha256: string;
+  /** e.g. 'aes-256-gcm'. */
+  encryption: string;
+  created_at: string;
+}
+
 export interface DatabaseSchema {
   clients: ClientsTable;
   profiles: ProfilesTable;
@@ -112,5 +130,6 @@ export interface DatabaseSchema {
   proxies: ProxiesTable;
   profile_proxy_assignments: ProfileProxyAssignmentsTable;
   api_tokens: ApiTokensTable;
+  backups: BackupsTable;
   _migrations: MigrationsTable;
 }

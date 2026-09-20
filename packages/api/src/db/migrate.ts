@@ -15,6 +15,7 @@ import { baseline } from './migrations/001-baseline.js';
 import { sessions } from './migrations/002-sessions.js';
 import { proxies } from './migrations/003-proxies.js';
 import { apiTokens } from './migrations/004-api-tokens.js';
+import { backups } from './migrations/005-backups.js';
 
 export interface Migration {
   readonly name: string;
@@ -23,7 +24,7 @@ export interface Migration {
 }
 
 /** Ordered list of all migrations. Append new ones at the end — never reorder. */
-export const MIGRATIONS: readonly Migration[] = [baseline, sessions, proxies, apiTokens];
+export const MIGRATIONS: readonly Migration[] = [baseline, sessions, proxies, apiTokens, backups];
 
 async function ensureJournalTable(db: Kysely<DatabaseSchema>): Promise<void> {
   await db.schema

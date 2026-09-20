@@ -338,6 +338,50 @@ async function launchReadiness(ctx: RouteContext): Promise<void> {
   }
 }
 
+async function createBackup(ctx: RouteContext): Promise<void> {
+  const id = ctx.params.id ?? '';
+  const backup = await ctx.backups.createBackup(id);
+  sendJson(ctx.res, 201, { backup });
+}
+
+async function listBackups(ctx: RouteContext): Promise<void> {
+  const id = ctx.params.id ?? '';
+  const backups = await ctx.backups.listBackups(id);
+  sendJson(ctx.res, 200, { backups });
+}
+
+async function getBackup(ctx: RouteContext): Promise<void> {
+  const backupId = ctx.params.backupId ?? '';
+  sendJson(ctx.res, 200, { backup: await ctx.backups.getBackup(backupId) });
+}
+
+async function verifyBackup(ctx: RouteContext): Promise<void> {
+  const backupId = ctx.params.backupId ?? '';
+  sendJson(ctx.res, 200, await ctx.backups.verifyBackup(backupId));
+}
+
+async function restoreBackup(ctx: RouteContext): Promise<void> {
+  const backupId = ctx.params.backupId ?? '';
+  const body = (ctx.body ?? {}) as { name?: unknown; clientId?: unknown };
+  if (typeof body.name !== 'string' || body.name.trim().length === 0) {
+    throw new ValidationError('Field is required: name');
+  }
+  if (body.clientId !== undefined && typeof body.clientId !== 'string') {
+    throw new ValidationError('Field must be a string: clientId');
+  }
+  const profile = await ctx.backups.restoreBackup(backupId, {
+    name: body.name,
+    ...(body.clientId !== undefined ? { clientId: body.clientId } : {}),
+  });
+  sendJson(ctx.res, 201, { profile });
+}
+
+async function deleteBackup(ctx: RouteContext): Promise<void> {
+  const backupId = ctx.params.backupId ?? '';
+  await ctx.backups.deleteBackup(backupId);
+  sendJson(ctx.res, 200, { deleted: true });
+}
+
 export function buildRoutes(): Route[] {
   return [
     defineRoute('GET', '/health', health, false),
@@ -365,5 +409,11 @@ export function buildRoutes(): Route[] {
     defineRoute('PATCH', '/v1/proxies/:id', patchProxy),
     defineRoute('DELETE', '/v1/proxies/:id', deleteProxyRoute),
     defineRoute('POST', '/v1/proxies/:id/health', proxyHealth),
+    defineRoute('POST', '/v1/profiles/:id/backups', createBackup),
+    defineRoute('GET', '/v1/profiles/:id/backups', listBackups),
+    defineRoute('GET', '/v1/backups/:backupId', getBackup),
+    defineRoute('POST', '/v1/backups/:backupId/verify', verifyBackup),
+    defineRoute('POST', '/v1/backups/:backupId/restore', restoreBackup),
+    defineRoute('DELETE', '/v1/backups/:backupId', deleteBackup),
   ];
 }

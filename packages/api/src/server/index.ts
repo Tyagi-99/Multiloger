@@ -25,6 +25,7 @@ import { profileEvents } from '../profiles/events.js';
 import { ProfileManager } from '../profiles/manager.js';
 import { getState } from '../profiles/stateMachine.js';
 import { ResourceManager, type ResourceManagerOptions } from '../resources/manager.js';
+import { BackupService } from '../backups/service.js';
 import { resolveProxyForLaunch } from '../proxies/service.js';
 import { authenticateRequest, createApiToken } from './tokens.js';
 import { TokenBucketLimiter, type RateLimitOptions } from './rateLimit.js';
@@ -49,6 +50,17 @@ export interface ServerOptions {
    * disabled). dataDir and the idle-stop wiring are set by the server.
    */
   resources?: Omit<ResourceManagerOptions, 'dataDir' | 'onIdleProfile'>;
+  /**
+   * Encrypted backups (Task 9). The key comes from backups.keyHex,
+   * backups.keyFile, or the MULTILOGER_BACKUP_KEY / MULTILOGER_BACKUP_KEY_FILE
+   * environment variables; backup endpoints answer 503 until one is set.
+   */
+  backups?: {
+    keyHex?: string;
+    keyFile?: string;
+    backupsDir?: string;
+    retention?: number;
+  };
 }
 
 export interface RunningServer {
@@ -119,6 +131,16 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   // Assigned after construction: the callback needs the manager, and the
   // manager needs the resources object. The idle timer cannot fire before
   // this runs (first tick is >= 1s out and reapIdle no-ops without it).
+  const backups = new BackupService({
+    db,
+    dataDir: options.dataDir,
+    ...(options.backups?.keyHex !== undefined ? { keyHex: options.backups.keyHex } : {}),
+    ...(options.backups?.keyFile !== undefined ? { keyFile: options.backups.keyFile } : {}),
+    ...(options.backups?.backupsDir !== undefined ? { backupsDir: options.backups.backupsDir } : {}),
+    ...(options.backups?.retention !== undefined ? { retention: options.backups.retention } : {}),
+    profiles: manager,
+  });
+
   resources.onIdleProfile = (profileId, idleMs) => {
     void (async () => {
       try {
@@ -211,6 +233,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
           dataDir: options.dataDir,
           lockTtlMs: options.lockTtlMs ?? 30_000,
           resources,
+          backups,
         };
         await route.handler(ctx);
         finish(res.statusCode);
@@ -252,6 +275,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         dataDir: options.dataDir,
         lockTtlMs: options.lockTtlMs ?? 30_000,
         resources,
+        backups,
       };
       await route.handler(ctx);
       finish(res.statusCode);

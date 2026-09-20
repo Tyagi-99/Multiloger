@@ -27,6 +27,16 @@ import {
   ProxyUnhealthyError,
 } from '../proxies/service.js';
 import { InsufficientDiskSpaceError, LaunchQueueTimeoutError } from '../resources/manager.js';
+import {
+  BackupBusyError,
+  BackupCorruptError,
+  BackupNotFoundError,
+} from '../backups/service.js';
+import {
+  BackupKeyError,
+  BackupKeyMissingError,
+  BackupKeyPermissionsError,
+} from '../backups/crypto.js';
 import { TokenNotFoundError } from './tokens.js';
 import { BodyTooLargeError, InvalidJsonError, ValidationError } from './router.js';
 
@@ -85,6 +95,21 @@ export function toHttpError(error: unknown): MappedError {
   }
   if (error instanceof InsufficientDiskSpaceError) {
     return mapped(503, 'INSUFFICIENT_DISK_SPACE', error.message);
+  }
+  if (error instanceof BackupNotFoundError) {
+    return mapped(404, 'BACKUP_NOT_FOUND', error.message);
+  }
+  if (error instanceof BackupKeyMissingError) {
+    return mapped(503, 'BACKUP_KEY_MISSING', error.message);
+  }
+  if (error instanceof BackupKeyPermissionsError || error instanceof BackupKeyError) {
+    return mapped(500, 'BACKUP_KEY_INVALID', error.message);
+  }
+  if (error instanceof BackupCorruptError) {
+    return mapped(422, 'BACKUP_CORRUPT', error.message);
+  }
+  if (error instanceof BackupBusyError) {
+    return mapped(409, 'BACKUP_BUSY', error.message);
   }
   if (error instanceof IllegalTransitionError) {
     return mapped(409, 'ILLEGAL_STATE_TRANSITION', error.message);

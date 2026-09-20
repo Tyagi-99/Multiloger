@@ -1,0 +1,63 @@
+/**
+ * tar helpers for profile backups.
+ *
+ * Chromium profile dirs accumulate regenerable bulk: HTTP caches, shader
+ * caches, crash dumps, logs, and lock files. Those are excluded — the
+ * backup keeps identity-bearing state (Preferences, cookies, sessions,
+ * extensions, local storage) so a restore lands the profile where the
+ * user left it, minus the junk.
+ *
+ * Uses the system `tar` (gzip-compressed); encryption happens on the
+ * compressed archive in crypto.ts.
+ */
+
+import { execFile } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
+
+/** Basename patterns excluded from every backup. */
+export const TAR_EXCLUDES = [
+  'Cache',
+  'Code Cache',
+  'GPUCache',
+  'ShaderCache',
+  'DawnCache',
+  'GraphiteDawnCache',
+  'Crashpad',
+  'Crash Reports',
+  '*.log',
+  'LOCK',
+  'Singleton*',
+];
+
+function runTar(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile('tar', args, { timeout: 300_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(`tar ${args[0] ?? ''} failed: ${stderr.trim() || error.message}`));
+      } else {
+        resolve(stdout);
+      }
+    });
+  });
+}
+
+/** Archive sourceDir (gzip) into outPath, applying TAR_EXCLUDES. */
+export async function createTar(sourceDir: string, outPath: string): Promise<void> {
+  const excludes = TAR_EXCLUDES.flatMap((pattern) => [`--exclude=${pattern}`]);
+  await runTar(['-czf', outPath, ...excludes, '-C', sourceDir, '.']);
+}
+
+/** Extract a gzip tar archive into destDir (created if needed). */
+export async function extractTar(archivePath: string, destDir: string): Promise<void> {
+  mkdirSync(destDir, { recursive: true, mode: 0o700 });
+  await runTar(['-xzf', archivePath, '-C', destDir]);
+}
+
+/** List member names of a gzip tar archive (for verify, without extracting). */
+export async function listTar(archivePath: string): Promise<string[]> {
+  const stdout = await runTar(['-tzf', archivePath]);
+  return stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}

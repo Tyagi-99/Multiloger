@@ -386,6 +386,119 @@ describe('API server (live)', () => {
     }
   }, 120_000);
 
+  describe('encrypted backups', () => {
+    const backupKey = randomBytes(32).toString('hex');
+    let backupId = '';
+
+    function withKey<T>(fn: () => Promise<T>): Promise<T> {
+      process.env.MULTILOGER_BACKUP_KEY = backupKey;
+      return fn().finally(() => {
+        delete process.env.MULTILOGER_BACKUP_KEY;
+      });
+    }
+
+    it('answers 503 when no backup key is configured', async () => {
+      const saved = process.env.MULTILOGER_BACKUP_KEY;
+      delete process.env.MULTILOGER_BACKUP_KEY;
+      try {
+        const res = await api<ErrorBody>('POST', `/v1/profiles/${profileId}/backups`, userToken);
+        expect(res.status).toBe(503);
+        expect(res.json.error.code).toBe('BACKUP_KEY_MISSING');
+      } finally {
+        if (saved !== undefined) {
+          process.env.MULTILOGER_BACKUP_KEY = saved;
+        }
+      }
+    });
+
+    it('creates, lists, verifies, restores, and deletes a backup', async () => {
+      await withKey(async () => {
+        const created = await api<{
+          backup: { id: string; sizeBytes: number; sha256: string; stoppedForBackup: boolean };
+        }>('POST', `/v1/profiles/${profileId}/backups`, userToken);
+        expect(created.status).toBe(201);
+        backupId = created.json.backup.id;
+        expect(created.json.backup.sizeBytes).toBeGreaterThan(0);
+        expect(created.json.backup.sha256).toMatch(/^[0-9a-f]{64}$/);
+        expect(created.json.backup.stoppedForBackup).toBe(false);
+
+        const listed = await api<{ backups: { id: string }[] }>(
+          'GET',
+          `/v1/profiles/${profileId}/backups`,
+          userToken,
+        );
+        expect(listed.status).toBe(200);
+        expect(listed.json.backups.map((b) => b.id)).toContain(backupId);
+
+        const got = await api<{ backup: { id: string } }>('GET', `/v1/backups/${backupId}`, userToken);
+        expect(got.status).toBe(200);
+        expect(got.json.backup.id).toBe(backupId);
+
+        const verified = await api<{ ok: boolean; entries: number; sha256Match: boolean }>(
+          'POST',
+          `/v1/backups/${backupId}/verify`,
+          userToken,
+        );
+        expect(verified.status).toBe(200);
+        expect(verified.json.ok).toBe(true);
+        expect(verified.json.sha256Match).toBe(true);
+        expect(verified.json.entries).toBeGreaterThan(0);
+
+        const restored = await api<{ profile: { id: string; name: string; state: string } }>(
+          'POST',
+          `/v1/backups/${backupId}/restore`,
+          userToken,
+          { name: 'restored-via-api' },
+        );
+        expect(restored.status).toBe(201);
+        expect(restored.json.profile.id).not.toBe(profileId);
+        expect(restored.json.profile.name).toBe('restored-via-api');
+        expect(restored.json.profile.state).toBe('created');
+
+        // The restored profile launches: the backup is a working profile dir.
+        const relaunched = await api<{ profile: ProfileDetail }>(
+          'POST',
+          `/v1/profiles/${restored.json.profile.id}/launch`,
+          userToken,
+        );
+        expect(relaunched.status).toBe(200);
+        expect(relaunched.json.profile.state).toBe('running');
+        const restopped = await api<{ profile: ProfileDetail }>(
+          'POST',
+          `/v1/profiles/${restored.json.profile.id}/stop`,
+          userToken,
+        );
+        expect(restopped.status).toBe(200);
+
+        const deleted = await api<{ deleted: boolean }>(
+          'DELETE',
+          `/v1/backups/${backupId}`,
+          userToken,
+        );
+        expect(deleted.status).toBe(200);
+        const gone = await api<ErrorBody>('GET', `/v1/backups/${backupId}`, userToken);
+        expect(gone.status).toBe(404);
+        expect(gone.json.error.code).toBe('BACKUP_NOT_FOUND');
+      });
+    });
+
+    it('rejects restore without a name', async () => {
+      await withKey(async () => {
+        const created = await api<{ backup: { id: string } }>(
+          'POST',
+          `/v1/profiles/${profileId}/backups`,
+          userToken,
+        );
+        expect(created.status).toBe(201);
+        const bid = created.json.backup.id;
+        const bad = await api<ErrorBody>('POST', `/v1/backups/${bid}/restore`, userToken, {});
+        expect(bad.status).toBe(400);
+        expect(bad.json.error.code).toBe('VALIDATION_ERROR');
+        await api('DELETE', `/v1/backups/${bid}`, userToken);
+      });
+    });
+  });
+
   it('revokes tokens', async () => {
     const listed = await api<{ tokens: PublicTokenShape[] }>('GET', '/v1/tokens', bootstrap);
     const mine = listed.json.tokens.find((t) => t.name === 'dashboard');
