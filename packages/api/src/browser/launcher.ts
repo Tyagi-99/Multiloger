@@ -111,6 +111,16 @@ export async function waitForCdpReady(cdpUrl: string, timeoutMs: number): Promis
 }
 
 /** Kill the whole process group (browser + renderers + GPU process). */
+/** Lightweight CDP health check: true when /json/version answers in time. */
+export async function pingCdp(cdpUrl: string, timeoutMs: number): Promise<boolean> {
+  try {
+    await fetchJson(`${cdpUrl}/json/version`, timeoutMs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function killBrowserGroup(pid: number, signal: NodeJS.Signals = 'SIGKILL'): void {
   try {
     // Negative PID = process group (spawned detached).

@@ -15,6 +15,7 @@ describe('transition table', () => {
     const legal: [ProfileState, ProfileState][] = [
       ['created', 'launching'],
       ['launching', 'running'],
+      ['launching', 'stopping'],
       ['launching', 'error'],
       ['launching', 'crashed'],
       ['running', 'stopping'],
@@ -32,7 +33,7 @@ describe('transition table', () => {
     for (const [from, to] of legal) {
       expect(canTransition(from, to), `${from} -> ${to}`).toBe(true);
     }
-    expect(legal).toHaveLength(15);
+    expect(legal).toHaveLength(16);
   });
 
   it('rejects every other pair in the full matrix', () => {
@@ -55,7 +56,7 @@ describe('transition table', () => {
         }
       }
     }
-    expect(legalCount).toBe(15);
+    expect(legalCount).toBe(16);
   });
 
   it('never allows a self-transition', () => {

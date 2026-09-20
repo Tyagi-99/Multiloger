@@ -32,6 +32,12 @@ export interface ProfilesTable {
   locked_at: string | null;
   /** Absolute path of the Chromium user-data directory. Unique per profile. */
   user_data_dir: string;
+  /** PID of the last browser process for this profile; null when not launched. */
+  last_pid: number | null;
+  /** CDP port of the last launch; null when not launched. */
+  last_cdp_port: number | null;
+  /** ISO-8601 timestamp of the last launch; null when never launched. */
+  last_launched_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -42,8 +48,21 @@ export interface MigrationsTable {
   applied_at: string;
 }
 
+/** One row per profile launch — history for "last used" and crash forensics. */
+export interface SessionsTable {
+  id: string;
+  profile_id: string;
+  started_at: string;
+  ended_at: string | null;
+  /** 'stopped' | 'crashed' | 'error' — how the session ended. */
+  exit_reason: string | null;
+  pid: number | null;
+  cdp_port: number | null;
+}
+
 export interface DatabaseSchema {
   clients: ClientsTable;
   profiles: ProfilesTable;
+  sessions: SessionsTable;
   _migrations: MigrationsTable;
 }

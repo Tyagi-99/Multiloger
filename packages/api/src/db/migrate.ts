@@ -12,6 +12,7 @@
 import type { Kysely } from 'kysely';
 import type { DatabaseSchema } from './schema.js';
 import { baseline } from './migrations/001-baseline.js';
+import { sessions } from './migrations/002-sessions.js';
 
 export interface Migration {
   readonly name: string;
@@ -20,7 +21,7 @@ export interface Migration {
 }
 
 /** Ordered list of all migrations. Append new ones at the end — never reorder. */
-export const MIGRATIONS: readonly Migration[] = [baseline];
+export const MIGRATIONS: readonly Migration[] = [baseline, sessions];
 
 async function ensureJournalTable(db: Kysely<DatabaseSchema>): Promise<void> {
   await db.schema

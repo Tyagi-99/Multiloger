@@ -54,15 +54,22 @@ describe('migration runner', () => {
     expect(await migrateToLatest(db)).toEqual([]);
   });
 
-  it('rolls back the baseline with migrateDown', async () => {
+  it('rolls back migrations newest-first with migrateDown', async () => {
     dir = mkdtempSync(join(tmpdir(), 'multiloger-mig-'));
     db = openDatabase({ path: join(dir, 'test.db') });
 
     await migrateToLatest(db);
-    const reverted = await migrateDown(db, 1);
-    expect(reverted).toEqual(['001-baseline']);
+    const revertedLatest = await migrateDown(db, 1);
+    expect(revertedLatest).toEqual(['002-sessions']);
 
-    const tables = await tableNames(db);
+    let tables = await tableNames(db);
+    expect(tables).not.toContain('sessions');
+    expect(tables).toContain('profiles');
+
+    const revertedBaseline = await migrateDown(db, 1);
+    expect(revertedBaseline).toEqual(['001-baseline']);
+
+    tables = await tableNames(db);
     expect(tables).not.toContain('clients');
     expect(tables).not.toContain('profiles');
 
@@ -70,7 +77,7 @@ describe('migration runner', () => {
     expect(journal).toEqual([]);
 
     // and the schema can be re-applied cleanly afterwards
-    expect(await migrateToLatest(db)).toEqual(['001-baseline']);
+    expect(await migrateToLatest(db)).toEqual(['001-baseline', '002-sessions']);
   });
 
   it('rejects invalid step counts', async () => {

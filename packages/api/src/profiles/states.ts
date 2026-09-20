@@ -23,7 +23,7 @@ export type ProfileState = (typeof PROFILE_STATES)[number];
 
 const TRANSITIONS: Record<ProfileState, readonly ProfileState[]> = {
   created: ['launching'],
-  launching: ['running', 'error', 'crashed'],
+  launching: ['running', 'stopping', 'error', 'crashed'],
   running: ['stopping', 'error', 'crashed'],
   stopping: ['stopped', 'error', 'crashed'],
   stopped: ['launching'],
