@@ -12,6 +12,8 @@ import { acquireLock, getLockInfo, newOwnerToken, ProfileNotFoundError } from '.
 import { getLastSession } from './sessions.js';
 import { killBrowserGroup, pingCdp } from '../browser/launcher.js';
 import { AlreadyRunningError, ProfileBusyError, ProfileManager, pidAlive } from './manager.js';
+import type { ProfileManagerOptions } from './manager.js';
+import { closeBrowserViaCdp } from '../browser/cdp.js';
 
 interface Fixture {
   dir: string;
@@ -21,7 +23,7 @@ interface Fixture {
   clientId: string;
 }
 
-async function setup(): Promise<Fixture> {
+async function setup(managerOptions: Partial<ProfileManagerOptions> = {}): Promise<Fixture> {
   const dir = mkdtempSync(join(tmpdir(), 'multiloger-mgr-'));
   const db = openDatabase({ path: join(dir, 'test.db') });
   await migrateToLatest(db);
@@ -31,7 +33,7 @@ async function setup(): Promise<Fixture> {
     name: 'p1',
     userDataDir: join(dir, 'profiles', 'p1'),
   });
-  const manager = new ProfileManager(db, { dataDir: dir, lockTtlMs: 3000 });
+  const manager = new ProfileManager(db, { dataDir: dir, lockTtlMs: 3000, ...managerOptions });
   manager.start();
   return { dir, db, manager, profileId: profile.id, clientId: client.id };
 }
@@ -91,6 +93,36 @@ describe('ProfileManager lifecycle (live Chromium)', () => {
     } finally {
       await manager.stopProfile(profileId);
     }
+  }, 60_000);
+
+  it('stop tries raw-CDP Browser.close first, then lands on stopped', async () => {
+    const cdpCloseCalls: { cdpUrl: string; timeoutMs: number }[] = [];
+    fixture = await setup({
+      gracefulClose: async (cdpUrl: string, timeoutMs: number) => {
+        cdpCloseCalls.push({ cdpUrl, timeoutMs });
+        return closeBrowserViaCdp(cdpUrl, timeoutMs);
+      },
+    });
+    const { db, manager, profileId } = fixture;
+    const launched = await manager.launchProfile(profileId);
+    await manager.stopProfile(profileId);
+
+    expect(await getState(db, profileId)).toBe('stopped');
+    // The graceful CDP path was attempted exactly once, with this profile's
+    // CDP URL, before any signal escalation.
+    expect(cdpCloseCalls.length).toBe(1);
+    expect(cdpCloseCalls[0]?.cdpUrl).toBe(launched.cdpUrl);
+    expect(pidAlive(launched.pid)).toBe(false);
+  }, 60_000);
+
+  it('stop falls back to signals when the CDP close cannot run', async () => {
+    fixture = await setup({ gracefulClose: () => Promise.resolve(false) });
+    const { db, manager, profileId } = fixture;
+    const launched = await manager.launchProfile(profileId);
+    await manager.stopProfile(profileId);
+
+    expect(await getState(db, profileId)).toBe('stopped');
+    expect(pidAlive(launched.pid)).toBe(false);
   }, 60_000);
 
   it('rejects a second launch while running', async () => {

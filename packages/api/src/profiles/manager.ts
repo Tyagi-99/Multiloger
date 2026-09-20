@@ -5,10 +5,11 @@
  * running. The lock is held for the whole session and heartbeated, so no
  * second manager (or API request) can double-launch a profile.
  *
- * Stop flow: running/launching → stopping → SIGTERM (graceful) → SIGKILL
- * escalation → stopped. Chromium treats SIGTERM as a clean shutdown
- * request, so this is equivalent to CDP Browser.close without needing a
- * WebSocket client in the MVP.
+ * Stop flow: running/launching → stopping → raw-CDP Browser.close
+ * (graceful) → SIGTERM → SIGKILL escalation → stopped. The CDP close is the
+ * real graceful path — Chromium runs unload handlers and flushes the profile
+ * before exiting; signals are only the fallback when CDP is unreachable or
+ * the browser does not die in time.
  *
  * Crash detection: the child 'exit' event fires on any unexpected death
  * (→ crashed); a monitor interval additionally watches process liveness
@@ -21,6 +22,7 @@ import type { DatabaseSchema } from '../db/schema.js';
 import type { LaunchedBrowser } from '../browser/launcher.js';
 import type { ProxyFlagOptions } from '../browser/flags.js';
 import { killBrowserGroup, launchChromium, pingCdp } from '../browser/launcher.js';
+import { closeBrowserViaCdp } from '../browser/cdp.js';
 import { getState, transitionState } from './stateMachine.js';
 import { IllegalTransitionError } from './states.js';
 import { acquireLock, heartbeatLock, newOwnerToken, releaseLock } from './lock.js';
@@ -28,6 +30,9 @@ import { getProfile } from './repository.js';
 import { endSession, startSession, type SessionExitReason } from './sessions.js';
 import { ensureWebrtcPolicy } from '../proxies/leak-guards.js';
 import type { ResourceManager } from '../resources/manager.js';
+
+/** Upper bound for the graceful raw-CDP Browser.close attempt during stop. */
+const CDP_CLOSE_TIMEOUT_MS = 10_000;
 
 export class AlreadyRunningError extends Error {
   readonly code = 'ALREADY_RUNNING';
@@ -101,6 +106,12 @@ export interface ProfileManagerOptions {
   resolveProxy?: ProxyResolver;
   /** Optional resource governor (Task 8): concurrency cap + launch queue. */
   resources?: ResourceManager;
+  /**
+   * Override for the graceful shutdown step (tests). Receives the profile's
+   * CDP http URL and returns true when the browser is going away because of
+   * the CDP close. Defaults to closeBrowserViaCdp.
+   */
+  gracefulClose?: (cdpUrl: string, timeoutMs: number) => Promise<boolean>;
 }
 
 export type LaunchResult = LiveProfileInfo;
@@ -132,6 +143,7 @@ export class ProfileManager {
   private readonly monitorIntervalMs: number;
   private readonly resolveProxy: ProxyResolver | undefined;
   private readonly resources: ResourceManager | undefined;
+  private readonly gracefulClose: (cdpUrl: string, timeoutMs: number) => Promise<boolean>;
   private readonly live = new Map<string, LiveProfile>();
   private heartbeatTimer: NodeJS.Timeout | undefined;
   private monitorTimer: NodeJS.Timeout | undefined;
@@ -145,6 +157,7 @@ export class ProfileManager {
     this.monitorIntervalMs = options.monitorIntervalMs ?? 10_000;
     this.resolveProxy = options.resolveProxy;
     this.resources = options.resources;
+    this.gracefulClose = options.gracefulClose ?? closeBrowserViaCdp;
   }
 
   get managedDataDir(): string {
@@ -384,15 +397,23 @@ export class ProfileManager {
   }
 
   /**
-   * SIGTERM (graceful — Chromium shuts down cleanly on it), wait, then
-   * SIGKILL. Polls PID liveness instead of relying on the child's 'exit'
-   * event so there is exactly one finalization path (stopProfile below);
-   * the exit handler stands down while `stopping` is set.
+   * Graceful first: raw-CDP `Browser.close`, which lets Chromium run unload
+   * handlers and flush the profile before exiting. Falls back to SIGTERM,
+   * then SIGKILL, when CDP is unreachable or the process does not die in
+   * time. Polls PID liveness instead of relying on the child's 'exit' event
+   * so there is exactly one finalization path (stopProfile below); the exit
+   * handler stands down while `stopping` is set.
    */
   private async terminateEntry(entry: LiveProfile, timeoutMs: number): Promise<void> {
     if (!pidAlive(entry.pid)) {
       return;
     }
+    // closeBrowserViaCdp never throws; false means "CDP could not do it".
+    const graceful = await this.gracefulClose(entry.cdpUrl, Math.min(timeoutMs, CDP_CLOSE_TIMEOUT_MS));
+    if (graceful && (await this.waitForDeath(entry.pid, timeoutMs))) {
+      return;
+    }
+
     try {
       // Negative PID = whole process group.
       process.kill(-entry.pid, 'SIGTERM');
