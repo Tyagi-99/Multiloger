@@ -1,8 +1,11 @@
 {
   "dependencies": {
-    "@multiloger/shared": "workspace:*"
+    "@multiloger/shared": "workspace:*",
+    "kysely": "^0.28.0"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  },
   "exports": {
     ".": {
       "default": "./dist/index.js",
