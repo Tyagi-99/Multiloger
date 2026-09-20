@@ -28,6 +28,11 @@ export interface FlagOptions {
   windowSize?: { width: number; height: number };
   /** Escape hatch, appended last. Prefer extending FlagOptions instead. */
   extraArgs?: string[];
+  /**
+   * Page to open on launch, appended as the final positional arg. Only
+   * http(s) URLs are accepted.
+   */
+  initialUrl?: string;
 }
 
 export class InvalidProxyError extends Error {
@@ -113,5 +118,23 @@ export function buildFlags(options: FlagOptions): string[] {
     flags.push(...options.extraArgs);
   }
 
+  if (options.initialUrl !== undefined) {
+    flags.push(validateInitialUrl(options.initialUrl));
+  }
+
   return flags;
+}
+
+/** Only http(s) may be opened on launch — no javascript:, file:, data:. */
+function validateInitialUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`Invalid initialUrl (not a URL): ${JSON.stringify(raw)}`);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`Invalid initialUrl (only http/https allowed): ${JSON.stringify(raw)}`);
+  }
+  return url.toString();
 }

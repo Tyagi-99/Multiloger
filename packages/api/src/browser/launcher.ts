@@ -21,6 +21,8 @@ export interface LaunchOptions {
   proxy?: FlagOptions['proxy'];
   windowSize?: FlagOptions['windowSize'];
   extraArgs?: string[];
+  /** Page to open on launch (http/https only). Appended as final arg. */
+  initialUrl?: string;
   /** How long to wait for the CDP endpoint. Defaults to 30s. */
   cdpTimeoutMs?: number;
   /** How many times to retry the whole spawn on port conflicts. */
@@ -185,6 +187,9 @@ async function attemptLaunch(
   }
   if (options.extraArgs !== undefined) {
     flagOptions.extraArgs = options.extraArgs;
+  }
+  if (options.initialUrl !== undefined) {
+    flagOptions.initialUrl = options.initialUrl;
   }
   const flags = buildFlags(flagOptions);
 

@@ -25,6 +25,24 @@ describe('buildFlags', () => {
     expect(flags).toContain('--user-data-dir=/data/p1');
   });
 
+  it('appends a validated initialUrl as the final positional arg', () => {
+    const flags = buildFlags({
+      userDataDir: '/data/p1',
+      cdpPort: 9222,
+      headless: true,
+      initialUrl: 'http://127.0.0.1:3000/',
+    });
+    expect(flags[flags.length - 1]).toBe('http://127.0.0.1:3000/');
+  });
+
+  it('rejects non-http(s) initialUrl values', () => {
+    for (const bad of ['javascript:alert(1)', 'file:///etc/passwd', 'ftp://x/y', 'not a url', '']) {
+      expect(() => buildFlags({ userDataDir: '/data/p1', cdpPort: 9222, headless: true, initialUrl: bad }), bad).toThrow(
+        /initialUrl/i,
+      );
+    }
+  });
+
   it('adds proxy flags for an http proxy', () => {
     const flags = buildFlags({
       userDataDir: '/data/p1',
