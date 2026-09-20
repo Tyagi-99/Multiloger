@@ -2,7 +2,7 @@
 
 Professional multi-profile Chromium platform for freelancers and teams managing
 many isolated client browser environments: persistent profiles, per-profile
-proxies, automation via Playwright/CDP, backups, audit logs, and a central
+proxies, automation via raw CDP, backups, audit logs, and a central
 dashboard.
 
 > **Design boundary:** Multiloger is built for legitimate multi-client
