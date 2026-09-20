@@ -208,3 +208,44 @@ export interface MonitoringSummary {
   metrics: SystemMetrics;
   alerts: MonitoringAlert[];
 }
+
+/** Phase 4b: public cloud-sync config (secret names only, never values). */
+export interface CloudSyncConfig {
+  endpoint: string;
+  bucket: string;
+  region: string;
+  prefix: string;
+  retentionDays: number;
+  accessKeySecretName: string;
+  secretKeySecretName: string;
+  allowInsecureHttp: boolean;
+  updatedAt: string;
+}
+
+/** Phase 4b: PUT /v1/cloud-sync/config body. */
+export interface CloudSyncConfigInput {
+  endpoint: string;
+  bucket: string;
+  region?: string;
+  prefix?: string;
+  retentionDays?: number;
+  accessKeySecretName: string;
+  secretKeySecretName: string;
+  allowInsecureHttp?: boolean;
+}
+
+/** Phase 4b: GET /v1/cloud-sync/objects entry. */
+export interface RemoteBackupObject {
+  key: string;
+  backupId: string | null;
+  size: number;
+  lastModified: string | null;
+  etag: string | null;
+}
+
+/** Phase 4b: POST /v1/cloud-sync/sync result. */
+export interface CloudSyncResult {
+  uploaded: string[];
+  skipped: string[];
+  failed: { backupId: string; error: string }[];
+}

@@ -29,6 +29,13 @@ import {
 } from '../proxies/service.js';
 import { InsufficientDiskSpaceError, LaunchQueueTimeoutError } from '../resources/manager.js';
 import { BackupBusyError, BackupCorruptError, BackupNotFoundError } from '../backups/service.js';
+import { S3Error, S3InsecureEndpointError } from '../cloudsync/s3.js';
+import {
+  CloudSyncClientRequiredError,
+  CloudSyncCredentialsError,
+  CloudSyncIntegrityError,
+  CloudSyncNotConfiguredError,
+} from '../cloudsync/service.js';
 import {
   JobNotFoundError,
   RunNotFoundError,
@@ -171,6 +178,24 @@ export function toHttpError(error: unknown): MappedError {
   }
   if (error instanceof BackupBusyError) {
     return mapped(409, 'BACKUP_BUSY', error.message);
+  }
+  if (error instanceof S3InsecureEndpointError) {
+    return mapped(400, 'CLOUD_SYNC_INSECURE_ENDPOINT', error.message);
+  }
+  if (error instanceof CloudSyncNotConfiguredError) {
+    return mapped(409, 'CLOUD_SYNC_NOT_CONFIGURED', error.message);
+  }
+  if (error instanceof CloudSyncCredentialsError) {
+    return mapped(400, 'CLOUD_SYNC_CREDENTIALS', error.message);
+  }
+  if (error instanceof CloudSyncIntegrityError) {
+    return mapped(422, 'CLOUD_SYNC_INTEGRITY', error.message);
+  }
+  if (error instanceof CloudSyncClientRequiredError) {
+    return mapped(400, 'CLOUD_SYNC_CLIENT_REQUIRED', error.message);
+  }
+  if (error instanceof S3Error) {
+    return mapped(error.httpStatus, 'CLOUD_SYNC_ERROR', error.message);
   }
   if (error instanceof IllegalTransitionError) {
     return mapped(409, 'ILLEGAL_STATE_TRANSITION', error.message);

@@ -11,6 +11,7 @@ import type { ResourceManager } from '../resources/manager.js';
 import type { BackupService } from '../backups/service.js';
 import type { AutomationRunner } from '../automation/runner.js';
 import type { MonitoringService } from '../monitoring/service.js';
+import type { CloudSyncService } from '../cloudsync/service.js';
 import type { ApiTokensTable } from './tokens.js';
 import type { Identity } from './access.js';
 import type { AuditActorType } from './audit.js';
@@ -57,6 +58,8 @@ export interface RouteContext {
   automation: AutomationRunner;
   /** Monitoring + alerting (Phase 4a). Undefined in bare test contexts. */
   monitoring: MonitoringService | undefined;
+  /** Encrypted S3 backup sync (Phase 4b). Undefined in bare test contexts. */
+  cloudSync: CloudSyncService | undefined;
 }
 
 export type RouteHandler = (ctx: RouteContext) => Promise<void>;
@@ -93,7 +96,7 @@ export interface Route {
 }
 
 export function defineRoute(
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   template: string,
   handler: RouteHandler,
   opts: RouteOptions = {},

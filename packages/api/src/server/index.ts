@@ -16,6 +16,7 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Kysely } from 'kysely';
 import { closeDatabase, openDatabase } from '../db/database.js';
 import { migrateToLatest } from '../db/migrate.js';
@@ -34,6 +35,7 @@ import { AutomationRunner } from '../automation/runner.js';
 import { monitoringEvents } from '../monitoring/events.js';
 import { MonitoringService } from '../monitoring/service.js';
 import type { MonitoringThresholds } from '../monitoring/metrics.js';
+import { CloudSyncService } from '../cloudsync/service.js';
 import { authenticateRequest, createApiToken } from './tokens.js';
 import { requirePermission, resolveIdentity, type Identity } from './access.js';
 import { recordAudit } from './audit.js';
@@ -182,6 +184,19 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       : {}),
     ...(options.backups?.retention !== undefined ? { retention: options.backups.retention } : {}),
     profiles: manager,
+  });
+
+  // Phase 4b: encrypted S3-compatible backup sync. Credentials come only
+  // from the vault; the config row stores secret names, never values.
+  const cloudSync = new CloudSyncService({
+    db,
+    backupService: backups,
+    backupsDir: options.backups?.backupsDir ?? join(options.dataDir, 'backups'),
+    vaultPath,
+    backupKeySource: {
+      ...(options.backups?.keyHex !== undefined ? { keyHex: options.backups.keyHex } : {}),
+      ...(options.backups?.keyFile !== undefined ? { keyFile: options.backups.keyFile } : {}),
+    },
   });
 
   resources.onIdleProfile = (profileId, idleMs) => {
@@ -357,6 +372,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
           resources,
           backups,
           automation,
+          cloudSync,
           monitoring,
         };
         await route.handler(ctx);
@@ -447,6 +463,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         resources,
         backups,
         automation,
+        cloudSync,
         monitoring,
       };
       await route.handler(ctx);

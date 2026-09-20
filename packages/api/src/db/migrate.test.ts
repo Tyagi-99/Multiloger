@@ -59,10 +59,17 @@ describe('migration runner', () => {
     db = openDatabase({ path: join(dir, 'test.db') });
 
     await migrateToLatest(db);
+    expect(await migrateDown(db, 1)).toEqual(['010-cloudsync-columns']);
+
+    // 010's rollback drops the prefix/sha256 columns but keeps the tables.
+    let tables = await tableNames(db);
+    expect(tables).toContain('cloud_sync_config');
+    expect(tables).toContain('cloud_sync_objects');
+
     expect(await migrateDown(db, 1)).toEqual(['009-phase4']);
 
     // 009's rollback drops the cloud-sync tables and its permission grants.
-    let tables = await tableNames(db);
+    tables = await tableNames(db);
     expect(tables).not.toContain('cloud_sync_config');
     expect(tables).not.toContain('cloud_sync_objects');
     expect(tables).toContain('users');
@@ -132,6 +139,7 @@ describe('migration runner', () => {
       '007-drop-script-name-unique',
       '008-teams',
       '009-phase4',
+      '010-cloudsync-columns',
     ]);
   });
 

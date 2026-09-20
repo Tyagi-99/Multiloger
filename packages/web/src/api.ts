@@ -10,12 +10,16 @@ import type {
   Backup,
   BackupVerification,
   Client,
+  CloudSyncConfig,
+  CloudSyncConfigInput,
+  CloudSyncResult,
   IdentityInfo,
   InvitationInfo,
   LaunchReadiness,
   MonitoringSummary,
   ProfileDetail,
   PublicProxy,
+  RemoteBackupObject,
   ResourceStatus,
   RoleInfo,
   Session,
@@ -168,6 +172,17 @@ export interface ApiClient {
   resourceStatus(): Promise<ResourceStatus>;
 
   monitoringSummary(): Promise<MonitoringSummary>;
+
+  cloudSyncConfig(): Promise<{ config: CloudSyncConfig }>;
+  saveCloudSyncConfig(input: CloudSyncConfigInput): Promise<{ config: CloudSyncConfig }>;
+  syncCloudNow(): Promise<CloudSyncResult>;
+  listCloudObjects(): Promise<{ objects: RemoteBackupObject[] }>;
+  restoreCloudObject(
+    key: string,
+    name: string,
+    clientId?: string,
+  ): Promise<{ backupId: string; profileId: string }>;
+  pruneCloudObjects(): Promise<{ deleted: string[] }>;
 }
 
 export function createApiClient(baseUrl: string, getToken: () => string | null): ApiClient {
@@ -216,6 +231,7 @@ export function createApiClient(baseUrl: string, getToken: () => string | null):
 
   const get = <T>(path: string): Promise<T> => request<T>('GET', path);
   const post = <T>(path: string, body?: unknown): Promise<T> => request<T>('POST', path, body);
+  const put = <T>(path: string, body?: unknown): Promise<T> => request<T>('PUT', path, body);
   const patch = <T>(path: string, body?: unknown): Promise<T> => request<T>('PATCH', path, body);
   const del = <T>(path: string): Promise<T> => request<T>('DELETE', path);
 
@@ -331,6 +347,18 @@ export function createApiClient(baseUrl: string, getToken: () => string | null):
 
     resourceStatus: () => get<ResourceStatus>('/v1/resources'),
     monitoringSummary: () => get<MonitoringSummary>('/v1/monitoring/summary'),
+
+    cloudSyncConfig: () => get<{ config: CloudSyncConfig }>('/v1/cloud-sync/config'),
+    saveCloudSyncConfig: (input: CloudSyncConfigInput) =>
+      put<{ config: CloudSyncConfig }>('/v1/cloud-sync/config', input),
+    syncCloudNow: () => post<CloudSyncResult>('/v1/cloud-sync/sync'),
+    listCloudObjects: () => get<{ objects: RemoteBackupObject[] }>('/v1/cloud-sync/objects'),
+    restoreCloudObject: (key: string, name: string, clientId?: string) =>
+      post<{ backupId: string; profileId: string }>(
+        '/v1/cloud-sync/restore',
+        clientId === undefined ? { key, name } : { key, name, clientId },
+      ),
+    pruneCloudObjects: () => post<{ deleted: string[] }>('/v1/cloud-sync/prune'),
   };
 }
 

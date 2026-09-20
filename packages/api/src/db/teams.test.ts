@@ -28,9 +28,9 @@ afterEach(async () => {
 });
 
 async function tableNames(database: Kysely<DatabaseSchema>): Promise<string[]> {
-  const rows = await sql<{ name: string }>`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`.execute(
-    database,
-  );
+  const rows = await sql<{
+    name: string;
+  }>`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`.execute(database);
   return rows.rows.map((r) => r.name);
 }
 
@@ -106,11 +106,11 @@ describe('migration 008-teams', () => {
     db = openDatabase({ path: join(dir, 'test.db') });
     await migrateToLatest(db);
 
-    const reverted = await migrateDown(db, 1);
-    expect(reverted).toEqual(['009-phase4']);
+    const reverted = await migrateDown(db, 2);
+    expect(reverted).toEqual(['010-cloudsync-columns', '009-phase4']);
 
-    // 009's rollback drops the cloud-sync tables and its permission grants;
-    // the team tables stay.
+    // 010's rollback drops the prefix/sha256 columns; 009's drops the
+    // cloud-sync tables and its permission grants. The team tables stay.
     const tables = await tableNames(db);
     expect(tables).not.toContain('cloud_sync_config');
     expect(tables).not.toContain('cloud_sync_objects');

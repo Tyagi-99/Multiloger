@@ -516,3 +516,51 @@ describe('RBAC (live)', () => {
     expect(listed.json.profiles.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe('cloud sync RBAC (live)', () => {
+  it('denies the mutating cloud-sync routes for viewers (403)', async () => {
+    const calls: [string, string, unknown?][] = [
+      ['GET', '/v1/cloud-sync/config'],
+      [
+        'PUT',
+        '/v1/cloud-sync/config',
+        {
+          endpoint: 'https://s3.example.com',
+          bucket: 'b',
+          accessKeySecretName: 'a',
+          secretKeySecretName: 's',
+        },
+      ],
+      ['POST', '/v1/cloud-sync/sync'],
+      ['POST', '/v1/cloud-sync/restore', { key: 'multiloger/x.mlbackup', name: 'x' }],
+      ['POST', '/v1/cloud-sync/prune'],
+    ];
+    for (const [method, path, body] of calls) {
+      const { status } = await api<ErrorBody>(method, path, viewerToken, body);
+      expect(`${method} ${path} → ${String(status)}`).toBe(`${method} ${path} → 403`);
+    }
+  });
+
+  it('lets viewers list remote objects (backups:read) but reports not-configured', async () => {
+    const { status, json } = await api<ErrorBody>('GET', '/v1/cloud-sync/objects', viewerToken);
+    expect(status).toBe(409);
+    expect(json.error.code).toBe('CLOUD_SYNC_NOT_CONFIGURED');
+  });
+
+  it('reports not-configured to an operator (409 CLOUD_SYNC_NOT_CONFIGURED)', async () => {
+    const { status, json } = await api<ErrorBody>('GET', '/v1/cloud-sync/config', operatorToken);
+    expect(status).toBe(409);
+    expect(json.error.code).toBe('CLOUD_SYNC_NOT_CONFIGURED');
+  });
+
+  it('rejects insecure endpoints through the API (400)', async () => {
+    const { status, json } = await api<ErrorBody>('PUT', '/v1/cloud-sync/config', operatorToken, {
+      endpoint: 'http://127.0.0.1:9000',
+      bucket: 'test-bucket',
+      accessKeySecretName: 's3-access-key-id',
+      secretKeySecretName: 's3-secret-access-key',
+    });
+    expect(status).toBe(400);
+    expect(json.error.code).toBe('CLOUD_SYNC_ERROR');
+  });
+});

@@ -246,6 +246,8 @@ export interface CloudSyncConfigTable {
   secret_key_secret: string;
   /** Remote objects kept by prune; older ones are deleted. */
   retention: number;
+  /** Object key prefix for remote backups, e.g. 'multiloger/'. */
+  prefix: string;
   /** 1 = allow http:// endpoints (local testing/MinIO); 0 = https only. */
   allow_insecure: number;
   updated_at: string;
@@ -258,6 +260,8 @@ export interface CloudSyncObjectsTable {
   object_key: string;
   etag: string | null;
   size_bytes: number;
+  /** Hex SHA-256 of the encrypted blob at upload time (integrity check). */
+  sha256: string | null;
   uploaded_at: string;
 }
 

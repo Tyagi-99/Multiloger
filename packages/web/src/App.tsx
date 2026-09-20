@@ -14,18 +14,29 @@ import { ProxiesPage } from './pages/Proxies.js';
 import { TokensPage } from './pages/Tokens.js';
 import { BackupsPage } from './pages/Backups.js';
 import { MonitoringPage } from './pages/Monitoring.js';
+import { CloudSyncPage } from './pages/CloudSync.js';
 import { TeamPage } from './pages/Team.js';
 import { AuditPage } from './pages/Audit.js';
 import { Button, Field, inputClass } from './ui.js';
 import type { IdentityInfo } from './types.js';
 
-type Page = 'profiles' | 'clients' | 'proxies' | 'backups' | 'tokens' | 'team' | 'audit' | 'monitoring';
+type Page =
+  | 'profiles'
+  | 'clients'
+  | 'proxies'
+  | 'backups'
+  | 'cloudsync'
+  | 'tokens'
+  | 'team'
+  | 'audit'
+  | 'monitoring';
 
 const ALL_NAV: { id: Page; label: string; permission: string }[] = [
   { id: 'profiles', label: 'Profiles', permission: 'profiles:read' },
   { id: 'clients', label: 'Clients', permission: 'clients:read' },
   { id: 'proxies', label: 'Proxies', permission: 'proxies:read' },
   { id: 'backups', label: 'Backups', permission: 'backups:read' },
+  { id: 'cloudsync', label: 'Cloud sync', permission: 'backups:read' },
   { id: 'monitoring', label: 'Monitoring', permission: 'monitoring:read' },
   { id: 'tokens', label: 'API tokens', permission: 'tokens:read' },
   { id: 'team', label: 'Team', permission: 'users:manage' },
@@ -303,6 +314,7 @@ function Dashboard(): React.JSX.Element {
         {page === 'clients' && <ClientsPage client={client} />}
         {page === 'proxies' && <ProxiesPage client={client} />}
         {page === 'backups' && <BackupsPage client={client} eventCount={eventCount} />}
+        {page === 'cloudsync' && <CloudSyncPage client={client} identity={identity} />}
         {page === 'tokens' && <TokensPage client={client} />}
         {page === 'team' && <TeamPage client={client} identity={identity} />}
         {page === 'audit' && <AuditPage client={client} />}
