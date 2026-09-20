@@ -28,11 +28,18 @@ import {
   ProxyUnhealthyError,
 } from '../proxies/service.js';
 import { InsufficientDiskSpaceError, LaunchQueueTimeoutError } from '../resources/manager.js';
+import { BackupBusyError, BackupCorruptError, BackupNotFoundError } from '../backups/service.js';
 import {
-  BackupBusyError,
-  BackupCorruptError,
-  BackupNotFoundError,
-} from '../backups/service.js';
+  JobNotFoundError,
+  RunNotFoundError,
+  ScriptNotFoundError,
+} from '../automation/repository.js';
+import {
+  ArtifactNotFoundError,
+  InvalidArtifactNameError,
+  ProfileNotRunningError,
+} from './automation-routes.js';
+import { ScriptValidationError } from '../automation/script.js';
 import {
   BackupKeyError,
   BackupKeyMissingError,
@@ -61,6 +68,9 @@ export function toHttpError(error: unknown): MappedError {
   if (error instanceof ValidationError) {
     return mapped(400, 'VALIDATION_ERROR', error.message);
   }
+  if (error instanceof ScriptValidationError) {
+    return mapped(400, 'INVALID_SCRIPT', error.message);
+  }
   if (error instanceof InvalidJsonError) {
     return mapped(400, 'INVALID_JSON', error.message);
   }
@@ -78,6 +88,24 @@ export function toHttpError(error: unknown): MappedError {
   }
   if (error instanceof TokenNotFoundError) {
     return mapped(404, 'TOKEN_NOT_FOUND', error.message);
+  }
+  if (error instanceof RunNotFoundError) {
+    return mapped(404, 'RUN_NOT_FOUND', error.message);
+  }
+  if (error instanceof JobNotFoundError) {
+    return mapped(404, 'JOB_NOT_FOUND', error.message);
+  }
+  if (error instanceof ScriptNotFoundError) {
+    return mapped(404, 'SCRIPT_NOT_FOUND', error.message);
+  }
+  if (error instanceof ProfileNotRunningError) {
+    return mapped(409, 'PROFILE_NOT_RUNNING', error.message);
+  }
+  if (error instanceof InvalidArtifactNameError) {
+    return mapped(400, 'INVALID_ARTIFACT_NAME', error.message);
+  }
+  if (error instanceof ArtifactNotFoundError) {
+    return mapped(404, 'ARTIFACT_NOT_FOUND', error.message);
   }
   if (error instanceof AlreadyRunningError) {
     return mapped(409, 'PROFILE_ALREADY_RUNNING', error.message);
@@ -145,7 +173,10 @@ export function toHttpError(error: unknown): MappedError {
   if (error instanceof LaunchFailedError) {
     return mapped(500, 'LAUNCH_FAILED', error.message);
   }
-  if (error instanceof Error && /^Cannot delete proxy .*: it is assigned to a profile$/.test(error.message)) {
+  if (
+    error instanceof Error &&
+    /^Cannot delete proxy .*: it is assigned to a profile$/.test(error.message)
+  ) {
     return mapped(409, 'PROXY_ASSIGNED', error.message);
   }
   if (error instanceof Error && error.message.startsWith('Token name must be ')) {
@@ -154,6 +185,10 @@ export function toHttpError(error: unknown): MappedError {
   return mapped(500, 'INTERNAL_ERROR', 'Unexpected server error');
 }
 
-export function httpErrorBody(status: number, code: string, message: string): { status: number; body: HttpErrorBody } {
+export function httpErrorBody(
+  status: number,
+  code: string,
+  message: string,
+): { status: number; body: HttpErrorBody } {
   return { status, body: { error: { code, message } } };
 }

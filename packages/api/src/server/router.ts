@@ -9,6 +9,7 @@ import type { DatabaseSchema } from '../db/schema.js';
 import type { ProfileManager } from '../profiles/manager.js';
 import type { ResourceManager } from '../resources/manager.js';
 import type { BackupService } from '../backups/service.js';
+import type { AutomationRunner } from '../automation/runner.js';
 import type { ApiTokensTable } from './tokens.js';
 
 export interface RouteContext {
@@ -31,6 +32,8 @@ export interface RouteContext {
   resources: ResourceManager | undefined;
   /** Encrypted backup service (Task 9). */
   backups: BackupService;
+  /** Automation job runner (Phase 2a). */
+  automation: AutomationRunner;
 }
 
 export type RouteHandler = (ctx: RouteContext) => Promise<void>;
@@ -65,7 +68,11 @@ export function defineRoute(
   return { method, template, pattern: new RegExp(`^${source}$`), paramNames, auth, handler };
 }
 
-export function matchRoute(routes: readonly Route[], method: string, pathname: string): { route: Route; params: Record<string, string> } | null {
+export function matchRoute(
+  routes: readonly Route[],
+  method: string,
+  pathname: string,
+): { route: Route; params: Record<string, string> } | null {
   for (const route of routes) {
     if (route.method !== method) {
       continue;
@@ -135,7 +142,12 @@ export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-export function sendJson(res: ServerResponse, status: number, payload: unknown, extraHeaders: Record<string, string> = {}): void {
+export function sendJson(
+  res: ServerResponse,
+  status: number,
+  payload: unknown,
+  extraHeaders: Record<string, string> = {},
+): void {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
@@ -153,7 +165,11 @@ export function requireObjectBody(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>;
 }
 
-export function getStringField(body: Record<string, unknown>, field: string, opts: { required?: boolean; maxLength?: number } = {}): string | undefined {
+export function getStringField(
+  body: Record<string, unknown>,
+  field: string,
+  opts: { required?: boolean; maxLength?: number } = {},
+): string | undefined {
   const value = body[field];
   if (value === undefined || value === null) {
     if (opts.required) {

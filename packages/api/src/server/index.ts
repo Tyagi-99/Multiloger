@@ -29,6 +29,8 @@ import { BackupService } from '../backups/service.js';
 import { findStaticFile, resolveStaticFile, serveStaticFile } from './static.js';
 import { resolveProxyAuthForLaunch, resolveProxyForLaunch } from '../proxies/service.js';
 import { resolveVaultPath } from '../vault/index.js';
+import { automationEvents } from '../automation/events.js';
+import { AutomationRunner } from '../automation/runner.js';
 import { authenticateRequest, createApiToken } from './tokens.js';
 import { TokenBucketLimiter, type RateLimitOptions } from './rateLimit.js';
 import { buildRoutes } from './routes.js';
@@ -62,6 +64,14 @@ export interface ServerOptions {
     keyFile?: string;
     backupsDir?: string;
     retention?: number;
+  };
+  /**
+   * Automation runner (Phase 2a): FIFO job execution against running
+   * profiles via their CDP endpoints. The runner never spawns browsers —
+   * it resolves CDP URLs from the ProfileManager's live set.
+   */
+  automation?: {
+    maxConcurrentRuns?: number;
   };
   /**
    * Directory holding the built dashboard (Task 10). When set, GET/HEAD
@@ -188,6 +198,18 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
       `orphansKilled=${String(reconcile.orphansKilled)}`,
   );
 
+  // Automation runner (Phase 2a): owns the run queue; reconciles
+  // interrupted runs and requeues queued ones on start().
+  const automation = new AutomationRunner({
+    db,
+    profiles: manager,
+    dataDir: options.dataDir,
+    ...(options.automation?.maxConcurrentRuns !== undefined
+      ? { maxConcurrentRuns: options.automation.maxConcurrentRuns }
+      : {}),
+  });
+  await automation.start();
+
   // Bootstrap: first start with no tokens prints a one-time token.
   let bootstrapToken: string | null = null;
   const existing = await db.selectFrom('api_tokens').select('id').limit(1).execute();
@@ -271,6 +293,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
           lockTtlMs: options.lockTtlMs ?? 30_000,
           resources,
           backups,
+          automation,
         };
         await route.handler(ctx);
         finish(res.statusCode);
@@ -316,6 +339,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         lockTtlMs: options.lockTtlMs ?? 30_000,
         resources,
         backups,
+        automation,
       };
       await route.handler(ctx);
       finish(res.statusCode);
@@ -352,6 +376,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   const offEvents = profileEvents.on((event) => {
     hub.broadcast(event);
   });
+  const offAutomationEvents = automationEvents.on((event) => {
+    hub.broadcast(event);
+  });
 
   const port = options.port ?? 0;
   await new Promise<void>((resolve, reject) => {
@@ -373,8 +400,10 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     }
     closed = true;
     offEvents();
+    offAutomationEvents();
     hub.close();
     resources.close();
+    await automation.close();
     await manager.shutdown();
     await new Promise<void>((resolve) => {
       httpServer.close(() => {

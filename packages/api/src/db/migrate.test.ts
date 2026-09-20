@@ -59,9 +59,17 @@ describe('migration runner', () => {
     db = openDatabase({ path: join(dir, 'test.db') });
 
     await migrateToLatest(db);
-    expect(await migrateDown(db, 1)).toEqual(['005-backups']);
+    expect(await migrateDown(db, 1)).toEqual(['006-automation']);
 
     let tables = await tableNames(db);
+    expect(tables).not.toContain('automation_scripts');
+    expect(tables).not.toContain('automation_jobs');
+    expect(tables).not.toContain('automation_runs');
+    expect(tables).toContain('backups');
+
+    expect(await migrateDown(db, 1)).toEqual(['005-backups']);
+
+    tables = await tableNames(db);
     expect(tables).not.toContain('backups');
     expect(tables).toContain('api_tokens');
 
@@ -98,6 +106,7 @@ describe('migration runner', () => {
       '003-proxies',
       '004-api-tokens',
       '005-backups',
+      '006-automation',
     ]);
   });
 

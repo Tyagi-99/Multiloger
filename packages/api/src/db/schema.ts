@@ -131,5 +131,70 @@ export interface DatabaseSchema {
   profile_proxy_assignments: ProfileProxyAssignmentsTable;
   api_tokens: ApiTokensTable;
   backups: BackupsTable;
+  automation_scripts: AutomationScriptsTable;
+  automation_jobs: AutomationJobsTable;
+  automation_runs: AutomationRunsTable;
   _migrations: MigrationsTable;
+}
+
+/**
+ * Versioned automation script. One row per (name, version); jobs pin a
+ * script id + version so re-publishing a script never changes history.
+ * `steps` is JSON: an array of declarative step objects (see
+ * automation/script.ts for the step language).
+ */
+export interface AutomationScriptsTable {
+  id: string;
+  name: string;
+  version: number;
+  description: string | null;
+  /** JSON-encoded AutomationStep[]. */
+  steps: string;
+  /** API token id that created the script; null for unknown/legacy. */
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * An automation job: "run script S (version V) against profile P".
+ * MVP creates exactly one run per job; the model allows fan-out later.
+ * Status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'.
+ */
+export interface AutomationJobsTable {
+  id: string;
+  name: string;
+  script_id: string;
+  script_version: number;
+  /** Profile id as plain text: no FK — run history must survive profile deletion. */
+  profile_id: string;
+  created_by: string | null;
+  status: string;
+  /** Per-run timeout in ms. */
+  timeout_ms: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * One execution of a job against a profile.
+ * Status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'.
+ * `logs` is JSON-encoded AutomationLogEntry[] (capped by the runner).
+ * `result_json` is JSON-encoded AutomationResult (per-step outcomes).
+ */
+export interface AutomationRunsTable {
+  id: string;
+  job_id: string;
+  profile_id: string;
+  status: string;
+  timeout_ms: number;
+  started_at: string | null;
+  finished_at: string | null;
+  logs: string;
+  result_json: string | null;
+  error: string | null;
+  /** Number of screenshot artifacts written for this run. */
+  artifact_count: number;
+  created_at: string;
+  updated_at: string;
 }

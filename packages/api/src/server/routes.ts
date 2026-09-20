@@ -36,6 +36,7 @@ import {
 } from '../proxies/index.js';
 import { resolveProxyForLaunch } from '../proxies/service.js';
 import { createApiToken, listApiTokens, revokeApiToken } from './tokens.js';
+import { buildAutomationRoutes } from './automation-routes.js';
 import {
   defineRoute,
   getStringField,
@@ -109,7 +110,10 @@ async function getClientById(ctx: RouteContext): Promise<void> {
 
 // ---------------------------------------------------------------- profiles
 
-async function profileDetail(ctx: RouteContext, profileId: string): Promise<Record<string, unknown>> {
+async function profileDetail(
+  ctx: RouteContext,
+  profileId: string,
+): Promise<Record<string, unknown>> {
   const profile = await getProfile(ctx.db, profileId);
   const lock = await getLockInfo(ctx.db, profileId, ctx.lockTtlMs);
   const assigned = await getAssignedProxy(ctx.db, profileId);
@@ -293,7 +297,12 @@ async function patchProxy(ctx: RouteContext): Promise<void> {
   }
   const portRaw = body.port;
   if (portRaw !== undefined) {
-    if (typeof portRaw !== 'number' || !Number.isInteger(portRaw) || portRaw < 1 || portRaw > 65535) {
+    if (
+      typeof portRaw !== 'number' ||
+      !Number.isInteger(portRaw) ||
+      portRaw < 1 ||
+      portRaw > 65535
+    ) {
       throw new ValidationError('Field must be an integer 1-65535: port');
     }
     input.port = portRaw;
@@ -330,7 +339,9 @@ async function launchReadiness(ctx: RouteContext): Promise<void> {
     const resolved = await resolveProxyForLaunch(ctx.db, id);
     sendJson(ctx.res, 200, {
       ready: true,
-      proxy: resolved ? { scheme: resolved.scheme, host: resolved.host, port: resolved.port } : null,
+      proxy: resolved
+        ? { scheme: resolved.scheme, host: resolved.host, port: resolved.port }
+        : null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -415,5 +426,6 @@ export function buildRoutes(): Route[] {
     defineRoute('POST', '/v1/backups/:backupId/verify', verifyBackup),
     defineRoute('POST', '/v1/backups/:backupId/restore', restoreBackup),
     defineRoute('DELETE', '/v1/backups/:backupId', deleteBackup),
+    ...buildAutomationRoutes(),
   ];
 }
