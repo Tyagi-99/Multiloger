@@ -15,6 +15,7 @@
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { mkdirSync } from 'node:fs';
 import type { Kysely } from 'kysely';
 import { closeDatabase, openDatabase } from '../db/database.js';
 import { migrateToLatest } from '../db/migrate.js';
@@ -22,6 +23,8 @@ import type { DatabaseSchema } from '../db/schema.js';
 import { reconcileOnBoot } from '../browser/reaper.js';
 import { profileEvents } from '../profiles/events.js';
 import { ProfileManager } from '../profiles/manager.js';
+import { getState } from '../profiles/stateMachine.js';
+import { ResourceManager, type ResourceManagerOptions } from '../resources/manager.js';
 import { resolveProxyForLaunch } from '../proxies/service.js';
 import { authenticateRequest, createApiToken } from './tokens.js';
 import { TokenBucketLimiter, type RateLimitOptions } from './rateLimit.js';
@@ -40,6 +43,12 @@ export interface ServerOptions {
   lockTtlMs?: number;
   rateLimit?: RateLimitOptions;
   anonymousRateLimit?: RateLimitOptions;
+  /**
+   * Resource governor (Task 8). Always constructed; defaults are
+   * conservative (max 4 concurrent, 1 GiB disk watermark, idle shutdown
+   * disabled). dataDir and the idle-stop wiring are set by the server.
+   */
+  resources?: Omit<ResourceManagerOptions, 'dataDir' | 'onIdleProfile'>;
 }
 
 export interface RunningServer {
@@ -68,12 +77,70 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   if (options.chromiumPath) {
     process.env.CHROMIUM_PATH = options.chromiumPath;
   }
+
+  // The server owns its dataDir: create it at boot so the disk watermark
+  // always has a real path to measure (and permission problems surface
+  // here, not on the first launch).
+  mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
+  // Idle shutdown is conservative by construction: only a profile the DB
+  // still reports as 'running' is stopped, and the stop itself goes through
+  // the manager's normal path (the lock heartbeat keeps the lock fresh).
+  // onIdleProfile is assigned after the manager exists (see below).
+  const resourceOptions: ResourceManagerOptions = {
+    dataDir: options.dataDir,
+  };
+  // exactOptionalPropertyTypes: only forward overrides that were set.
+  const resourceOverrides = options.resources;
+  if (resourceOverrides?.maxConcurrent !== undefined) {
+    resourceOptions.maxConcurrent = resourceOverrides.maxConcurrent;
+  }
+  if (resourceOverrides?.queueTimeoutMs !== undefined) {
+    resourceOptions.queueTimeoutMs = resourceOverrides.queueTimeoutMs;
+  }
+  if (resourceOverrides?.idleShutdownMs !== undefined) {
+    resourceOptions.idleShutdownMs = resourceOverrides.idleShutdownMs;
+  }
+  if (resourceOverrides?.minFreeDiskBytes !== undefined) {
+    resourceOptions.minFreeDiskBytes = resourceOverrides.minFreeDiskBytes;
+  }
+  if (resourceOverrides?.checkDiskBeforeLaunch !== undefined) {
+    resourceOptions.checkDiskBeforeLaunch = resourceOverrides.checkDiskBeforeLaunch;
+  }
+  const resources = new ResourceManager(resourceOptions);
+
   const manager = new ProfileManager(db, {
     dataDir: options.dataDir,
     headless: options.headless ?? true,
     lockTtlMs: options.lockTtlMs ?? 30_000,
     resolveProxy: (profileId: string) => resolveProxyForLaunch(db, profileId),
+    resources,
   });
+
+  // Assigned after construction: the callback needs the manager, and the
+  // manager needs the resources object. The idle timer cannot fire before
+  // this runs (first tick is >= 1s out and reapIdle no-ops without it).
+  resources.onIdleProfile = (profileId, idleMs) => {
+    void (async () => {
+      try {
+        const state = await getState(db, profileId).catch(() => null);
+        if (state !== 'running') {
+          return;
+        }
+        profileEvents.emit({
+          type: 'profile.idle-stopped',
+          profileId,
+          idleMs,
+          at: new Date().toISOString(),
+        });
+        await manager.stopProfile(profileId);
+      } catch (error) {
+        console.error(
+          `[multiloger] idle stop of profile ${profileId} failed:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    })();
+  };
 
   const reconcile = await reconcileOnBoot(db, options.dataDir, options.lockTtlMs ?? 30_000);
   // eslint-disable-next-line no-console
@@ -143,6 +210,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
           manager,
           dataDir: options.dataDir,
           lockTtlMs: options.lockTtlMs ?? 30_000,
+          resources,
         };
         await route.handler(ctx);
         finish(res.statusCode);
@@ -183,6 +251,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
         manager,
         dataDir: options.dataDir,
         lockTtlMs: options.lockTtlMs ?? 30_000,
+        resources,
       };
       await route.handler(ctx);
       finish(res.statusCode);
@@ -235,6 +304,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     closed = true;
     offEvents();
     hub.close();
+    resources.close();
     await manager.shutdown();
     await new Promise<void>((resolve) => {
       httpServer.close(() => {

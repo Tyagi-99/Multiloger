@@ -27,6 +27,7 @@ import { acquireLock, heartbeatLock, newOwnerToken, releaseLock } from './lock.j
 import { getProfile } from './repository.js';
 import { endSession, startSession, type SessionExitReason } from './sessions.js';
 import { ensureWebrtcPolicy } from '../proxies/leak-guards.js';
+import type { ResourceManager } from '../resources/manager.js';
 
 export class AlreadyRunningError extends Error {
   readonly code = 'ALREADY_RUNNING';
@@ -98,6 +99,8 @@ export interface ProfileManagerOptions {
   monitorIntervalMs?: number;
   /** Optional proxy resolution hook (wired by Task 6). */
   resolveProxy?: ProxyResolver;
+  /** Optional resource governor (Task 8): concurrency cap + launch queue. */
+  resources?: ResourceManager;
 }
 
 export type LaunchResult = LiveProfileInfo;
@@ -117,12 +120,18 @@ export function pidAlive(pid: number): boolean {
 }
 
 export class ProfileManager {
+  /** The resource governor, when configured (Task 8). */
+  get resourceManager(): ResourceManager | undefined {
+    return this.resources;
+  }
+
   private readonly db: Kysely<DatabaseSchema>;
   private readonly dataDir: string;
   private readonly lockTtlMs: number;
   private readonly headless: boolean;
   private readonly monitorIntervalMs: number;
   private readonly resolveProxy: ProxyResolver | undefined;
+  private readonly resources: ResourceManager | undefined;
   private readonly live = new Map<string, LiveProfile>();
   private heartbeatTimer: NodeJS.Timeout | undefined;
   private monitorTimer: NodeJS.Timeout | undefined;
@@ -135,6 +144,7 @@ export class ProfileManager {
     this.headless = options.headless ?? true;
     this.monitorIntervalMs = options.monitorIntervalMs ?? 10_000;
     this.resolveProxy = options.resolveProxy;
+    this.resources = options.resources;
   }
 
   get managedDataDir(): string {
@@ -187,7 +197,27 @@ export class ProfileManager {
 
   // ---------------------------------------------------------------- launch
 
+  /**
+   * Launch a profile, acquiring a resource slot first when a ResourceManager
+   * is configured. The slot is held until the profile stops or crashes;
+   * every failure before the profile goes live releases it. (The live check
+   * guards the double-launch race: the winner keeps the slot.)
+   */
   async launchProfile(profileId: string, headless?: boolean): Promise<LaunchResult> {
+    if (this.resources) {
+      await this.resources.acquire(profileId);
+    }
+    try {
+      return await this.launchProfileInner(profileId, headless);
+    } catch (error) {
+      if (!this.live.has(profileId)) {
+        this.resources?.release(profileId);
+      }
+      throw error;
+    }
+  }
+
+  private async launchProfileInner(profileId: string, headless?: boolean): Promise<LaunchResult> {
     if (this.live.has(profileId)) {
       throw new AlreadyRunningError(profileId);
     }
@@ -309,6 +339,7 @@ export class ProfileManager {
    * entry (a previous manager died — run the reaper).
    */
   async stopProfile(profileId: string, timeoutMs = 5000): Promise<void> {
+    this.resources?.noteActivity(profileId);
     const entry = this.live.get(profileId);
     if (!entry) {
       await this.stopUnmanaged(profileId);
@@ -414,6 +445,7 @@ export class ProfileManager {
       .execute()
       .catch(() => undefined);
     await releaseLock(this.db, entry.profileId, entry.owner);
+    this.resources?.release(entry.profileId);
   }
 
   async restartProfile(profileId: string, headless?: boolean): Promise<LaunchResult> {
@@ -452,6 +484,7 @@ export class ProfileManager {
       }
     }
     await releaseLock(this.db, entry.profileId, entry.owner);
+    this.resources?.release(entry.profileId);
   }
 
   // ------------------------------------------------------- loops

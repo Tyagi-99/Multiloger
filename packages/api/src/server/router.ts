@@ -7,6 +7,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Kysely } from 'kysely';
 import type { DatabaseSchema } from '../db/schema.js';
 import type { ProfileManager } from '../profiles/manager.js';
+import type { ResourceManager } from '../resources/manager.js';
 import type { ApiTokensTable } from './tokens.js';
 
 export interface RouteContext {
@@ -25,6 +26,8 @@ export interface RouteContext {
   dataDir: string;
   /** Lock TTL in ms, for lock staleness reporting. */
   lockTtlMs: number;
+  /** Resource governor (Task 8); undefined when not configured. */
+  resources: ResourceManager | undefined;
 }
 
 export type RouteHandler = (ctx: RouteContext) => Promise<void>;

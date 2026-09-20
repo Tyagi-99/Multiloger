@@ -26,6 +26,7 @@ import {
   ProxyRequiredError,
   ProxyUnhealthyError,
 } from '../proxies/service.js';
+import { InsufficientDiskSpaceError, LaunchQueueTimeoutError } from '../resources/manager.js';
 import { TokenNotFoundError } from './tokens.js';
 import { BodyTooLargeError, InvalidJsonError, ValidationError } from './router.js';
 
@@ -78,6 +79,12 @@ export function toHttpError(error: unknown): MappedError {
   }
   if (error instanceof ProfileStopTimeoutError) {
     return mapped(504, 'PROFILE_STOP_TIMEOUT', error.message);
+  }
+  if (error instanceof LaunchQueueTimeoutError) {
+    return mapped(503, 'LAUNCH_QUEUE_TIMEOUT', error.message);
+  }
+  if (error instanceof InsufficientDiskSpaceError) {
+    return mapped(503, 'INSUFFICIENT_DISK_SPACE', error.message);
   }
   if (error instanceof IllegalTransitionError) {
     return mapped(409, 'ILLEGAL_STATE_TRANSITION', error.message);

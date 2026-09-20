@@ -25,7 +25,43 @@ export interface ProfileLockEvent {
   at: string;
 }
 
-export type ProfileDomainEvent = ProfileStateChangedEvent | ProfileLockEvent;
+export interface ProfileLaunchQueuedEvent {
+  type: 'profile.launch-queued';
+  profileId: string;
+  /** 1-based FIFO position at enqueue time. */
+  position: number;
+  at: string;
+}
+
+export interface ProfileLaunchAdmittedEvent {
+  type: 'profile.launch-admitted';
+  profileId: string;
+  /** Milliseconds spent waiting in the queue. */
+  waitedMs: number;
+  at: string;
+}
+
+export interface ProfileLaunchQueueTimeoutEvent {
+  type: 'profile.launch-queue-timeout';
+  profileId: string;
+  timeoutMs: number;
+  at: string;
+}
+
+export interface ProfileIdleStoppedEvent {
+  type: 'profile.idle-stopped';
+  profileId: string;
+  idleMs: number;
+  at: string;
+}
+
+export type ProfileDomainEvent =
+  | ProfileStateChangedEvent
+  | ProfileLockEvent
+  | ProfileLaunchQueuedEvent
+  | ProfileLaunchAdmittedEvent
+  | ProfileLaunchQueueTimeoutEvent
+  | ProfileIdleStoppedEvent;
 
 export type ProfileEventListener = (event: ProfileDomainEvent) => void;
 

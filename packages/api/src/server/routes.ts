@@ -48,6 +48,16 @@ import {
 
 const VERSION = '0.1.0';
 
+function resourceStatus(ctx: RouteContext): Promise<void> {
+  const resources = ctx.resources ?? ctx.manager.resourceManager;
+  if (!resources) {
+    sendJson(ctx.res, 200, { enabled: false });
+  } else {
+    sendJson(ctx.res, 200, { enabled: true, ...resources.status });
+  }
+  return Promise.resolve();
+}
+
 function health(ctx: RouteContext): Promise<void> {
   sendJson(ctx.res, 200, { ok: true, version: VERSION });
   return Promise.resolve();
@@ -331,6 +341,7 @@ async function launchReadiness(ctx: RouteContext): Promise<void> {
 export function buildRoutes(): Route[] {
   return [
     defineRoute('GET', '/health', health, false),
+    defineRoute('GET', '/v1/resources', resourceStatus),
     defineRoute('POST', '/v1/tokens', createToken),
     defineRoute('GET', '/v1/tokens', listTokens),
     defineRoute('POST', '/v1/tokens/:id/revoke', revokeToken),

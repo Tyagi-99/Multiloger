@@ -188,7 +188,14 @@ async function waitFor(tap: WsTap, predicate: (event: WsEvent) => boolean, timeo
 }
 
 beforeAll(async () => {
-  server = await startServer({ dbPath: join(DIR, 'api.db'), dataDir: join(DIR, 'profiles'), port: 0 });
+  server = await startServer({
+    dbPath: join(DIR, 'api.db'),
+    dataDir: join(DIR, 'profiles'),
+    port: 0,
+    // The tmpfs tmpdir on CI VMs sits below the 1 GiB default watermark;
+    // the watermark itself is unit-tested in resources.test.ts.
+    resources: { checkDiskBeforeLaunch: false },
+  });
   base = `http://127.0.0.1:${String(server.port)}`;
   bootstrap = server.bootstrapToken ?? '';
   expect(bootstrap).toMatch(/^mlt_/);
@@ -209,6 +216,24 @@ describe('API server (live)', () => {
     const { status, json } = await api<{ ok: boolean; version: string }>('GET', '/health', null);
     expect(status).toBe(200);
     expect(json.ok).toBe(true);
+  });
+
+  it('reports resource governor status at /v1/resources', async () => {
+    const { status, json } = await api<{
+      enabled: boolean;
+      maxConcurrent: number;
+      running: number;
+      queued: string[];
+      idleShutdownMs: number;
+      minFreeDiskBytes: number;
+    }>('GET', '/v1/resources', bootstrap);
+    expect(status).toBe(200);
+    expect(json.enabled).toBe(true);
+    expect(json.maxConcurrent).toBe(4);
+    expect(json.running).toBe(0);
+    expect(json.queued).toEqual([]);
+    expect(json.idleShutdownMs).toBe(0);
+    expect(json.minFreeDiskBytes).toBeGreaterThan(0);
   });
 
   it('rejects unauthenticated API access', async () => {
