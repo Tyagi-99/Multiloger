@@ -57,7 +57,14 @@ async function roleIdsOf(db: Kysely<DatabaseSchema>, userId: string): Promise<st
 }
 
 function toPublicUser(
-  row: { id: string; name: string; email: string; disabled: number; created_at: string; updated_at: string },
+  row: {
+    id: string;
+    name: string;
+    email: string;
+    disabled: number;
+    created_at: string;
+    updated_at: string;
+  },
   roles: string[],
 ): PublicUser {
   return {
@@ -73,7 +80,11 @@ function toPublicUser(
 
 async function assertRolesExist(db: Kysely<DatabaseSchema>, roleIds: string[]): Promise<void> {
   for (const roleId of roleIds) {
-    const role = await db.selectFrom('roles').select('id').where('id', '=', roleId).executeTakeFirst();
+    const role = await db
+      .selectFrom('roles')
+      .select('id')
+      .where('id', '=', roleId)
+      .executeTakeFirst();
     if (!role) {
       throw new RoleNotFoundError(roleId);
     }
@@ -87,7 +98,10 @@ export interface CreateUserInput {
   roleIds?: string[];
 }
 
-export async function createUser(db: Kysely<DatabaseSchema>, input: CreateUserInput): Promise<PublicUser> {
+export async function createUser(
+  db: Kysely<DatabaseSchema>,
+  input: CreateUserInput,
+): Promise<PublicUser> {
   const name = input.name.trim();
   if (name.length === 0 || name.length > 200) {
     throw new ValidationError('Field must be 1-200 characters: name');
@@ -95,7 +109,11 @@ export async function createUser(db: Kysely<DatabaseSchema>, input: CreateUserIn
   const email = validateEmail(input.email);
   const roleIds = [...new Set(input.roleIds ?? [])];
   await assertRolesExist(db, roleIds);
-  const existing = await db.selectFrom('users').select('id').where('email', '=', email).executeTakeFirst();
+  const existing = await db
+    .selectFrom('users')
+    .select('id')
+    .where('email', '=', email)
+    .executeTakeFirst();
   if (existing) {
     throw new ValidationError(`Email is already registered: ${email}`);
   }
@@ -105,7 +123,15 @@ export async function createUser(db: Kysely<DatabaseSchema>, input: CreateUserIn
   await db.transaction().execute(async (trx) => {
     await trx
       .insertInto('users')
-      .values({ id, name, email, password_hash: passwordHash, disabled: 0, created_at: now, updated_at: now })
+      .values({
+        id,
+        name,
+        email,
+        password_hash: passwordHash,
+        disabled: 0,
+        created_at: now,
+        updated_at: now,
+      })
       .execute();
     for (const roleId of roleIds) {
       await trx
@@ -128,7 +154,10 @@ export async function getUser(db: Kysely<DatabaseSchema>, userId: string): Promi
   return toPublicUser(row, await roleIdsOf(db, userId));
 }
 
-export async function getUserByEmail(db: Kysely<DatabaseSchema>, email: string): Promise<PublicUser | null> {
+export async function getUserByEmail(
+  db: Kysely<DatabaseSchema>,
+  email: string,
+): Promise<PublicUser | null> {
   const row = await db
     .selectFrom('users')
     .selectAll()
@@ -200,7 +229,11 @@ export async function deleteUser(db: Kysely<DatabaseSchema>, userId: string): Pr
   });
 }
 
-export async function addUserRole(db: Kysely<DatabaseSchema>, userId: string, roleId: string): Promise<PublicUser> {
+export async function addUserRole(
+  db: Kysely<DatabaseSchema>,
+  userId: string,
+  roleId: string,
+): Promise<PublicUser> {
   await getUser(db, userId);
   await assertRolesExist(db, [roleId]);
   await db
@@ -217,7 +250,11 @@ export async function removeUserRole(
   roleId: string,
 ): Promise<PublicUser> {
   await getUser(db, userId);
-  await db.deleteFrom('user_roles').where('user_id', '=', userId).where('role_id', '=', roleId).execute();
+  await db
+    .deleteFrom('user_roles')
+    .where('user_id', '=', userId)
+    .where('role_id', '=', roleId)
+    .execute();
   return getUser(db, userId);
 }
 
@@ -231,7 +268,11 @@ export async function countAdmins(db: Kysely<DatabaseSchema>): Promise<number> {
   return Number(row?.total ?? 0);
 }
 
-export async function userHasRole(db: Kysely<DatabaseSchema>, userId: string, roleId: string): Promise<boolean> {
+export async function userHasRole(
+  db: Kysely<DatabaseSchema>,
+  userId: string,
+  roleId: string,
+): Promise<boolean> {
   const row = await db
     .selectFrom('user_roles')
     .select('role_id')
@@ -272,14 +313,22 @@ export async function setUserPassword(
 // ---------------------------------------------------------------- scoping
 
 async function assertClientExists(db: Kysely<DatabaseSchema>, clientId: string): Promise<void> {
-  const row = await db.selectFrom('clients').select('id').where('id', '=', clientId).executeTakeFirst();
+  const row = await db
+    .selectFrom('clients')
+    .select('id')
+    .where('id', '=', clientId)
+    .executeTakeFirst();
   if (!row) {
     throw new ValidationError(`Unknown client: ${clientId}`);
   }
 }
 
 async function assertProfileExists(db: Kysely<DatabaseSchema>, profileId: string): Promise<void> {
-  const row = await db.selectFrom('profiles').select('id').where('id', '=', profileId).executeTakeFirst();
+  const row = await db
+    .selectFrom('profiles')
+    .select('id')
+    .where('id', '=', profileId)
+    .executeTakeFirst();
   if (!row) {
     throw new ValidationError(`Unknown profile: ${profileId}`);
   }
@@ -344,7 +393,10 @@ export interface UserScopes {
   profiles: string[];
 }
 
-export async function getUserScopes(db: Kysely<DatabaseSchema>, userId: string): Promise<UserScopes> {
+export async function getUserScopes(
+  db: Kysely<DatabaseSchema>,
+  userId: string,
+): Promise<UserScopes> {
   await getUser(db, userId);
   const clients = await db
     .selectFrom('user_clients')
@@ -416,10 +468,19 @@ export async function createRole(
   await db.transaction().execute(async (trx) => {
     await trx
       .insertInto('roles')
-      .values({ id, name, description: input.description?.trim() ?? null, seeded: 0, created_at: now })
+      .values({
+        id,
+        name,
+        description: input.description?.trim() ?? null,
+        seeded: 0,
+        created_at: now,
+      })
       .execute();
     for (const key of permissionKeys) {
-      await trx.insertInto('role_permissions').values({ role_id: id, permission_id: key }).execute();
+      await trx
+        .insertInto('role_permissions')
+        .values({ role_id: id, permission_id: key })
+        .execute();
     }
   });
   const roles = await listRoles(db);

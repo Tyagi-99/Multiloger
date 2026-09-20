@@ -15,6 +15,7 @@ interface AuthState {
   token: string | null;
   client: ApiClient;
   login: (token: string) => Promise<void>;
+  loginWithPassword: (email: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -35,6 +36,15 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
 
   const client = useMemo(() => createApiClient('', () => tokenRef.current), []);
 
+  const storeToken = useCallback((trimmed: string) => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, trimmed);
+    } catch {
+      // Storage unavailable (private mode): keep it in memory only.
+    }
+    setToken(trimmed);
+  }, []);
+
   const login = useCallback(
     async (next: string) => {
       const trimmed = next.trim();
@@ -51,14 +61,27 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
         }
         throw new Error(`Could not reach the API: ${messageOf(error)}`);
       }
-      try {
-        window.localStorage.setItem(STORAGE_KEY, trimmed);
-      } catch {
-        // Storage unavailable (private mode): keep it in memory only.
-      }
-      setToken(trimmed);
+      storeToken(trimmed);
     },
-    [],
+    [storeToken],
+  );
+
+  const loginWithPassword = useCallback(
+    async (email: string, password: string) => {
+      const probe = createApiClient('', () => null);
+      let token: string;
+      try {
+        const res = await probe.loginWithPassword(email.trim(), password);
+        token = res.token;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          throw new Error('Invalid email or password');
+        }
+        throw new Error(`Could not reach the API: ${messageOf(error)}`);
+      }
+      storeToken(token);
+    },
+    [storeToken],
   );
 
   const logout = useCallback(() => {
@@ -70,7 +93,10 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     setToken(null);
   }, []);
 
-  const value = useMemo(() => ({ token, client, login, logout }), [token, client, login, logout]);
+  const value = useMemo(
+    () => ({ token, client, login, loginWithPassword, logout }),
+    [token, client, login, loginWithPassword, logout],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

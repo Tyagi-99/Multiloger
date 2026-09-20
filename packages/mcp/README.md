@@ -66,9 +66,46 @@ Add to `claude_desktop_config.json` (use the absolute path to the built file):
 | `get_run_logs`       | Timestamped log lines of a run (read-only).                                                                                                   |
 | `get_run_artifact`   | Download one screenshot artifact (e.g. `2.png`) and return it as an image (read-only).                                                        |
 | `cancel_job`         | Cancel a job and its in-flight runs.                                                                                                          |
+| `whoami`             | Show the identity this server acts as: token kind, roles, permissions, scopes (read-only).                                                    |
+| `audit_log`          | Query the audit log with filters (read-only; requires `audit:read`).                                                                          |
 
 Tool failures surface the API's own error code and message, e.g.
 `API error [PROFILE_NOT_FOUND] (HTTP 404): No such profile`.
+
+## Scoped tokens (Phase 3 team management)
+
+The MCP server uses **one** API token for all tools. That token can be:
+
+- a **legacy token** (created before team management, or with no user) — full
+  access to everything, including user administration. Convenient for a
+  personal setup; do not hand it to an agent you would not trust with the
+  dashboard's Team page.
+- a **user-attributed, scope-narrowed token** — least privilege for agents.
+  Create one as an admin:
+
+```bash
+# 1. create the user (admin, via the bootstrap/legacy token)
+curl -s -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"name":"Agent","email":"agent@example.com","password":"a-very-long-password-1","roleIds":["operator"]}' \
+  http://127.0.0.1:3000/v1/users
+
+# 2. grant the client(s) the agent may touch
+curl -s -X POST -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"clientId":"<client-id>"}' \
+  http://127.0.0.1:3000/v1/users/<user-id>/clients
+
+# 3. issue a narrowed token: read + automation only, no user admin
+curl -s -X POST -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"name":"mcp-agent","scopes":["profiles:read","profiles:launch","profiles:stop","automation:read","automation:scripts:manage","automation:run","audit:read"]}' \
+  http://127.0.0.1:3000/v1/users/<user-id>/tokens
+```
+
+Then point `MULTILOGER_API_TOKEN` at the issued token. Scopes can only
+**narrow** the user's role permissions, never widen them. Tools the token is
+not allowed to use fail with a clear error, e.g.
+`API error [FORBIDDEN] (HTTP 403): Missing permission: automation:run`.
+The `whoami` tool reports the effective identity, so an agent can check its
+own capabilities before acting.
 
 ## Automation step language
 

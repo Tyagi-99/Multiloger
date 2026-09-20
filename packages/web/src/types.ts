@@ -67,6 +67,67 @@ export interface ApiToken {
   createdAt: string;
   lastUsedAt: string | null;
   revokedAt: string | null;
+  /** Phase 3: user attribution and scope narrowing (absent on legacy tokens). */
+  userId: string | null;
+  scopes: string[] | null;
+  createdBy: string | null;
+}
+
+/** Phase 3: a team user as returned by the API. */
+export interface TeamUser {
+  id: string;
+  name: string;
+  email: string;
+  disabled: boolean;
+  roles: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Phase 3: a role with its permission keys. */
+export interface RoleInfo {
+  id: string;
+  name: string;
+  description: string | null;
+  seeded: boolean;
+  permissions: string[];
+}
+
+/** Phase 3: a pending invitation (the plaintext token is shown once at creation). */
+export interface InvitationInfo {
+  id: string;
+  email: string;
+  roleId: string;
+  clientIds: string[];
+  profileIds: string[];
+  expiresAt: string;
+  usedAt: string | null;
+  createdAt: string;
+}
+
+/** Phase 3: one audit-log entry. */
+export interface AuditEntry {
+  id: string;
+  at: string;
+  actorType: string;
+  actorId: string | null;
+  action: string;
+  entityType: string | null;
+  entityId: string | null;
+  details: unknown;
+  ip: string | null;
+}
+
+/** Phase 3: the caller's identity as reported by GET /v1/auth/me. */
+export interface IdentityInfo {
+  kind: 'legacy' | 'user';
+  userId: string | null;
+  tokenId: string;
+  legacy: boolean;
+  isAdmin: boolean;
+  permissions: string[];
+  scopes: string[] | null;
+  user: TeamUser | null;
 }
 
 export interface Backup {

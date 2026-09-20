@@ -47,9 +47,14 @@ export function TokensPage({ client }: { client: ApiClient }): React.JSX.Element
     <div>
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-xl font-semibold">API tokens</h1>
-        <Button variant="primary" onClick={(): void => {
-          setShowCreate(true);
-        }}>New token</Button>
+        <Button
+          variant="primary"
+          onClick={(): void => {
+            setShowCreate(true);
+          }}
+        >
+          New token
+        </Button>
       </div>
       {error && (
         <ErrorBanner
@@ -90,9 +95,13 @@ export function TokensPage({ client }: { client: ApiClient }): React.JSX.Element
                   </td>
                   <td className="px-4 py-2">
                     {!t.revokedAt && (
-                      <Button variant="danger" disabled={busy} onClick={(): void => {
-                        void revoke(t.id, t.name);
-                      }}>
+                      <Button
+                        variant="danger"
+                        disabled={busy}
+                        onClick={(): void => {
+                          void revoke(t.id, t.name);
+                        }}
+                      >
                         Revoke
                       </Button>
                     )}
@@ -105,10 +114,13 @@ export function TokensPage({ client }: { client: ApiClient }): React.JSX.Element
       )}
 
       {showCreate && (
-        <Modal title="New API token" onClose={(): void => {
+        <Modal
+          title="New API token"
+          onClose={(): void => {
             setShowCreate(false);
             setPlaintext(null);
-          }}>
+          }}
+        >
           {plaintext ? (
             <div>
               <p className="mb-2 text-sm text-amber-300">
@@ -118,10 +130,13 @@ export function TokensPage({ client }: { client: ApiClient }): React.JSX.Element
                 {plaintext}
               </code>
               <div className="mt-4 flex justify-end">
-                <Button variant="primary" onClick={(): void => {
-                  setShowCreate(false);
-                  setPlaintext(null);
-                }}>
+                <Button
+                  variant="primary"
+                  onClick={(): void => {
+                    setShowCreate(false);
+                    setPlaintext(null);
+                  }}
+                >
                   Done
                 </Button>
               </div>
@@ -137,7 +152,7 @@ export function TokensPage({ client }: { client: ApiClient }): React.JSX.Element
                 client
                   .createToken(trimmed)
                   .then((res) => {
-                    setPlaintext(res.plaintext);
+                    setPlaintext(res.token);
                     return refresh();
                   })
                   .catch((err: unknown) => {
@@ -160,10 +175,17 @@ export function TokensPage({ client }: { client: ApiClient }): React.JSX.Element
                 />
               </Field>
               <div className="flex justify-end gap-2">
-                <Button variant="ghost" onClick={(): void => {
-                  setShowCreate(false);
-                }}>Cancel</Button>
-                <Button variant="primary" submit>Create token</Button>
+                <Button
+                  variant="ghost"
+                  onClick={(): void => {
+                    setShowCreate(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button variant="primary" submit>
+                  Create token
+                </Button>
               </div>
             </form>
           )}

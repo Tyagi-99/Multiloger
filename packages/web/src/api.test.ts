@@ -74,7 +74,9 @@ describe('api client', () => {
 
   it('throws ApiError with the server code on HTTP errors', async () => {
     stubFetch(() =>
-      jsonResponse(401, { error: { code: 'UNAUTHORIZED', message: 'Invalid or missing API token' } }),
+      jsonResponse(401, {
+        error: { code: 'UNAUTHORIZED', message: 'Invalid or missing API token' },
+      }),
     );
     const client = createApiClient('', () => 'bad');
     const error = await client.get('/v1/profiles').catch((e: unknown) => e);
@@ -103,6 +105,97 @@ describe('api client', () => {
     const client = createApiClient('', () => 'mlt_secret');
     await client.listBackups('profile-1');
     await client.verifyBackup('backup-1');
-    expect(seen).toEqual(['GET /v1/profiles/profile-1/backups', 'POST /v1/backups/backup-1/verify']);
+    expect(seen).toEqual([
+      'GET /v1/profiles/profile-1/backups',
+      'POST /v1/backups/backup-1/verify',
+    ]);
+  });
+
+  it('wires the team endpoints with the right paths and bodies', async () => {
+    const seen: { method: string; url: string; body: unknown }[] = [];
+    stubFetch((req) => {
+      seen.push({
+        method: String(req.init.method),
+        url: req.url,
+        body: req.init.body === undefined ? undefined : JSON.parse(req.init.body as string),
+      });
+      return jsonResponse(200, { ok: true });
+    });
+    const client = createApiClient('', () => 'mlt_secret');
+
+    await client.getIdentity();
+    await client.listUsers();
+    await client.createUser({
+      name: 'N',
+      email: 'n@example.com',
+      password: 'long-password-1',
+      roleIds: ['viewer'],
+    });
+    await client.updateUser('u1', { disabled: true });
+    await client.deleteUser('u1');
+    await client.assignRole('u1', 'operator');
+    await client.removeRole('u1', 'operator');
+    await client.grantClientAccess('u1', 'c1');
+    await client.revokeClientAccess('u1', 'c1');
+    await client.grantProfileAccess('u1', 'p1');
+    await client.revokeProfileAccess('u1', 'p1');
+    await client.getUserScopes('u1');
+    await client.listUserTokens('u1');
+    await client.issueUserToken('u1', 'agent', ['profiles:read']);
+    await client.listRoles();
+    await client.createRole({ id: 'support', name: 'Support', permissions: ['profiles:read'] });
+    await client.deleteRole('support');
+    await client.listInvitations();
+    await client.createInvitation({ email: 'i@example.com', roleId: 'viewer' });
+    await client.revokeInvitation('inv1');
+    await client.queryAuditLog({ action: 'profile.launch', limit: 10, offset: 20 });
+
+    expect(seen.map((s) => `${s.method} ${s.url}`)).toEqual([
+      'GET /v1/auth/me',
+      'GET /v1/users',
+      'POST /v1/users',
+      'PATCH /v1/users/u1',
+      'DELETE /v1/users/u1',
+      'POST /v1/users/u1/roles',
+      'DELETE /v1/users/u1/roles/operator',
+      'POST /v1/users/u1/clients',
+      'DELETE /v1/users/u1/clients/c1',
+      'POST /v1/users/u1/profiles',
+      'DELETE /v1/users/u1/profiles/p1',
+      'GET /v1/users/u1/scopes',
+      'GET /v1/users/u1/tokens',
+      'POST /v1/users/u1/tokens',
+      'GET /v1/roles',
+      'POST /v1/roles',
+      'DELETE /v1/roles/support',
+      'GET /v1/invitations',
+      'POST /v1/invitations',
+      'POST /v1/invitations/inv1/revoke',
+      'GET /v1/audit-log?action=profile.launch&limit=10&offset=20',
+    ]);
+    expect(seen[2]?.body).toEqual({
+      name: 'N',
+      email: 'n@example.com',
+      password: 'long-password-1',
+      roleIds: ['viewer'],
+    });
+    expect(seen[13]?.body).toEqual({ name: 'agent', scopes: ['profiles:read'] });
+  });
+
+  it('loginWithPassword posts to /v1/auth/login and unwraps the token', async () => {
+    let capturedBody: unknown;
+    stubFetch((req) => {
+      capturedBody = JSON.parse(req.init.body as string);
+      // No Authorization header when logging in with a password.
+      expect((req.init.headers as Record<string, string>).authorization ?? null).toBe(null);
+      return jsonResponse(201, {
+        user: { id: 'u1' },
+        token: { id: 't1', name: 'login', token: 'mlt_secret', createdAt: 'x' },
+      });
+    });
+    const client = createApiClient('', () => null);
+    const res = await client.loginWithPassword('op@example.com', 'password-1');
+    expect(res).toEqual({ token: 'mlt_secret' });
+    expect(capturedBody).toEqual({ email: 'op@example.com', password: 'password-1' });
   });
 });

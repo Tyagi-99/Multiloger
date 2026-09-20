@@ -48,7 +48,7 @@ multiloger --port 3000 --data-dir ./multiloger-data
 
 On first start with no API tokens, a **bootstrap token is printed once** —
 save it immediately, then create a named token via the dashboard
-(Settings → API tokens) or `POST /v1/tokens`. The dashboard is served at
+(API tokens page) or `POST /v1/tokens`. The dashboard is served at
 `http://127.0.0.1:3000/` (default bind is loopback only).
 
 Configuration precedence: **CLI flag > `MULTILOGER_*` env var > default**.
@@ -96,3 +96,83 @@ launching unauthenticated.
   enforced per profile.
 - No features for bypassing platform security, fraud detection, CAPTCHAs,
   account bans, or anti-abuse systems — by design.
+
+## Team management + RBAC
+
+Multiloger supports multiple users with role-based permissions and
+per-client/per-profile scoping. **Existing setups are unaffected:** tokens
+created before this feature (including the bootstrap token) are _legacy
+tokens_ with full access — nothing changes for a single-user install.
+
+### Concepts
+
+- **Users** sign in with email + password (scrypt-hashed, never stored in
+  plaintext) and are issued user-attributed API tokens.
+- **Roles** bundle permissions. Built-in: `admin` (everything), `operator`
+  (day-to-day profile/automation/backups work, no user admin), `viewer`
+  (read-only). Custom roles can be created via `POST /v1/roles`.
+- **Token scopes** narrow a token to a subset of the user's permissions.
+  Scopes can only _remove_ access, never grant more than the role allows.
+  Unknown scope keys are rejected.
+- **Client/profile scoping**: a non-admin user only sees and touches the
+  clients/profiles explicitly granted to them. Everything else answers `403`
+  (existence is never leaked via `404`).
+- **Audit log**: every mutating API call appends an entry (actor, action,
+  entity, IP). No request bodies, passwords, or secrets are recorded.
+
+### Setting up the first team
+
+Run these with the bootstrap/legacy token (`$ADMIN`):
+
+```bash
+# 1. create the first admin user
+curl -s -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"name":"You","email":"you@example.com","password":"a-very-long-password-1","roleIds":["admin"]}' \
+  http://127.0.0.1:3000/v1/users
+
+# 2. invite a teammate (token is shown ONCE — deliver it yourself;
+#    Multiloger does not send email)
+curl -s -X POST -H "Authorization: Bearer $ADMIN" -H 'content-type: application/json' \
+  -d '{"email":"teammate@example.com","roleId":"operator","clientIds":["<client-id>"],"expiresInHours":72}' \
+  http://127.0.0.1:3000/v1/invitations
+# → { "invitation": {...}, "token": "mli_..." }
+
+# teammate redeems (single-use, expires):
+curl -s -X POST -H 'content-type: application/json' \
+  -d '{"token":"mli_...","name":"Teammate","password":"their-very-long-password-1"}' \
+  http://127.0.0.1:3000/v1/invitations/redeem
+```
+
+Password login issues a token attributed to the user:
+
+```bash
+curl -s -X POST -H 'content-type: application/json' \
+  -d '{"email":"teammate@example.com","password":"their-very-long-password-1"}' \
+  http://127.0.0.1:3000/v1/auth/login
+# → { "user": {...}, "token": { "token": "mlt_..." } }
+```
+
+The dashboard sign-in screen offers both **API token** and **Email + password**
+tabs; the Team and Audit log pages appear in the sidebar for users whose
+permissions allow them.
+
+### Useful endpoints
+
+| Task                            | Endpoint                                                 |
+| ------------------------------- | -------------------------------------------------------- |
+| Identity & permissions          | `GET /v1/auth/me`                                        |
+| Change own password             | `POST /v1/auth/password`                                 |
+| Manage users/roles/scopes       | `/v1/users/*`, `/v1/roles`                               |
+| Issue a scoped token for a user | `POST /v1/users/:id/tokens`                              |
+| Query audit log                 | `GET /v1/audit-log?action=…&actorId=…&limit=50&offset=0` |
+
+Non-admin callers querying the audit log only ever see their own actions.
+The MCP server can run on a narrowed token — see `packages/mcp/README.md`
+("Scoped tokens") — and exposes `whoami` / `audit_log` tools.
+
+### Upgrading an existing database
+
+Migration `008-teams` runs automatically on startup. It adds the team tables
+and three nullable columns on `api_tokens`; existing tokens keep working
+with full (legacy) access. Roll back with `migrateDown` if needed — the
+migration is fully reversible.

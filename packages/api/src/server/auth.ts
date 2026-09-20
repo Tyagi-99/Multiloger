@@ -55,7 +55,11 @@ export async function hashTokenSecret(plain: string): Promise<TokenHash> {
   return { salt: salt.toString('hex'), hash: key.toString('hex') };
 }
 
-export async function verifyTokenSecret(plain: string, saltHex: string, hashHex: string): Promise<boolean> {
+export async function verifyTokenSecret(
+  plain: string,
+  saltHex: string,
+  hashHex: string,
+): Promise<boolean> {
   const key = await scryptAsync(plain, Buffer.from(saltHex, 'hex'), KEY_BYTES);
   const expected = Buffer.from(hashHex, 'hex');
   if (key.length !== expected.length || expected.length === 0) {

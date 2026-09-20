@@ -198,6 +198,35 @@ interface CancelResponse {
   cancelledRuns: number;
 }
 
+interface IdentityResponse {
+  identity: {
+    kind: string;
+    userId: string | null;
+    tokenId: string;
+    legacy: boolean;
+    isAdmin: boolean;
+    permissions: string[];
+    scopes: string[] | null;
+    user: { id: string; name: string; email: string; roles: string[] } | null;
+  };
+}
+
+interface AuditLogResponse {
+  entries: {
+    id: string;
+    at: string;
+    actorType: string;
+    actorId: string | null;
+    action: string;
+    entityType: string | null;
+    entityId: string | null;
+    ip: string | null;
+  }[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 /* ------------------------------------------------------------------ */
 /* Tool definitions                                                   */
 /* ------------------------------------------------------------------ */
@@ -529,6 +558,7 @@ function buildCancelJob(client: ApiClientLike): ToolDefinition {
 /** Build all tool definitions bound to the given API client. */
 export function buildTools(client: ApiClientLike): ToolDefinition[] {
   return [
+    buildWhoAmI(client),
     buildListProfiles(client),
     buildGetProfileStatus(client),
     buildLaunchProfile(client),
@@ -541,5 +571,104 @@ export function buildTools(client: ApiClientLike): ToolDefinition[] {
     buildGetRunLogs(client),
     buildGetRunArtifact(client),
     buildCancelJob(client),
+    buildAuditLog(client),
   ];
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase 3: identity + audit-log tools (scoped-token aware)             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Report who this MCP server is authenticated as: legacy token (full
+ * access) or a user-attributed token with its roles, permissions, and
+ * scope narrowing. Lets the agent know what it is allowed to do before
+ * it tries — a 403 from any other tool means "not permitted", not a bug.
+ */
+function buildWhoAmI(client: ApiClientLike): ToolDefinition {
+  const input = z.object({});
+  return {
+    name: 'whoami',
+    description:
+      'Show the identity this MCP server acts as: token kind (legacy full-access or ' +
+      'user-attributed), roles, permission keys, and token scope narrowing. Call this ' +
+      'first to learn your capabilities. Read-only.',
+    inputSchema: input.shape,
+    handler: async (rawArgs) => {
+      input.parse(rawArgs);
+      return apiTool(async () => {
+        const { identity } = await client.request<IdentityResponse>('GET', '/v1/auth/me');
+        const lines = [
+          `kind: ${identity.kind}${identity.legacy ? ' (legacy: full access, pre-team token)' : ''}`,
+          `admin: ${String(identity.isAdmin)}`,
+        ];
+        if (identity.user) {
+          lines.push(
+            `user: ${identity.user.name} <${identity.user.email}> (roles: ${identity.user.roles.join(', ')})`,
+          );
+        }
+        lines.push(
+          `token scopes: ${identity.scopes === null ? '(none — role permissions apply fully)' : identity.scopes.join(', ')}`,
+        );
+        lines.push(
+          `permissions (${String(identity.permissions.length)}): ${identity.permissions.join(', ')}`,
+        );
+        return lines.join('\n');
+      });
+    },
+  };
+}
+
+/**
+ * Query the append-only audit log. Requires the audit:read permission;
+ * non-admin identities only ever see their own actions (enforced
+ * server-side). Useful to verify what a previous tool call changed.
+ */
+function buildAuditLog(client: ApiClientLike): ToolDefinition {
+  const input = z.object({
+    action: z
+      .string()
+      .optional()
+      .describe('Substring match on the action key, e.g. "profile.launch".'),
+    actorId: z.string().optional().describe('Filter to one actor (user or token id).'),
+    entityType: z.string().optional().describe('Filter by entity type, e.g. "profile", "client".'),
+    entityId: z.string().optional().describe('Filter by one entity id.'),
+    since: z.string().optional().describe('ISO timestamp: only entries at or after this time.'),
+    until: z.string().optional().describe('ISO timestamp: only entries before this time.'),
+    limit: z.number().int().positive().max(200).optional().describe('Page size (default 50).'),
+    offset: z.number().int().nonnegative().optional().describe('Pagination offset.'),
+  });
+  return {
+    name: 'audit_log',
+    description:
+      'Query the Multiloger audit log: who did what, when, to which entity. ' +
+      'Read-only. Requires the audit:read permission; returns a 403 error otherwise.',
+    inputSchema: input.shape,
+    handler: async (rawArgs) => {
+      const args = input.parse(rawArgs);
+      return apiTool(async () => {
+        const query = new URLSearchParams();
+        if (args.action !== undefined) query.set('action', args.action);
+        if (args.actorId !== undefined) query.set('actorId', args.actorId);
+        if (args.entityType !== undefined) query.set('entityType', args.entityType);
+        if (args.entityId !== undefined) query.set('entityId', args.entityId);
+        if (args.since !== undefined) query.set('since', args.since);
+        if (args.until !== undefined) query.set('until', args.until);
+        if (args.limit !== undefined) query.set('limit', String(args.limit));
+        if (args.offset !== undefined) query.set('offset', String(args.offset));
+        const suffix = query.toString();
+        const { entries, total, offset } = await client.request<AuditLogResponse>(
+          'GET',
+          suffix ? `/v1/audit-log?${suffix}` : '/v1/audit-log',
+        );
+        if (entries.length === 0) return 'No audit entries match.';
+        const lines = entries.map(
+          (e) =>
+            `- [${e.at}] ${e.action} actor=${e.actorType}:${(e.actorId ?? '?').slice(0, 8)} ` +
+            `entity=${e.entityType ?? '-'}:${(e.entityId ?? '-').slice(0, 8)}`,
+        );
+        return `Audit log: ${String(total)} total, showing ${String(offset + 1)}–${String(offset + entries.length)}:\n${lines.join('\n')}`;
+      });
+    },
+  };
 }

@@ -90,9 +90,7 @@ export async function queryAuditLog(
   if (query.since !== undefined) {
     base = base.where('at', '>=', query.since);
   }
-  const totalRow = await base
-    .select((eb) => eb.fn.countAll().as('total'))
-    .executeTakeFirst();
+  const totalRow = await base.select((eb) => eb.fn.countAll().as('total')).executeTakeFirst();
   const total = Number(totalRow?.total ?? 0);
   const rows = await base
     .selectAll()

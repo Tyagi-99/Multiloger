@@ -27,7 +27,12 @@ let server: RunningServer;
 let base = '';
 let bootstrap = '';
 
-async function api<T>(method: string, path: string, token: string | null, body?: unknown): Promise<ApiResult<T>> {
+async function api<T>(
+  method: string,
+  path: string,
+  token: string | null,
+  body?: unknown,
+): Promise<ApiResult<T>> {
   const headers: Record<string, string> = {};
   if (token) {
     headers.authorization = `Bearer ${token}`;
@@ -37,7 +42,11 @@ async function api<T>(method: string, path: string, token: string | null, body?:
     headers['content-type'] = 'application/json';
     raw = JSON.stringify(body);
   }
-  const res = await fetch(`${base}${path}`, { method, headers, ...(raw !== undefined ? { body: raw } : {}) });
+  const res = await fetch(`${base}${path}`, {
+    method,
+    headers,
+    ...(raw !== undefined ? { body: raw } : {}),
+  });
   const rawJson: unknown = await res.json().catch((): null => null);
   return { status: res.status, json: rawJson as T };
 }
@@ -86,13 +95,23 @@ beforeAll(async () => {
   expect(bootstrap).toMatch(/^mlt_/);
 
   // Two clients with one profile each (legacy bootstrap: full access).
-  clientA = (await api<{ client: { id: string } }>('POST', '/v1/clients', bootstrap, { name: 'Client A' })).json.client.id;
-  clientB = (await api<{ client: { id: string } }>('POST', '/v1/clients', bootstrap, { name: 'Client B' })).json.client.id;
+  clientA = (
+    await api<{ client: { id: string } }>('POST', '/v1/clients', bootstrap, { name: 'Client A' })
+  ).json.client.id;
+  clientB = (
+    await api<{ client: { id: string } }>('POST', '/v1/clients', bootstrap, { name: 'Client B' })
+  ).json.client.id;
   profileA = (
-    await api<{ profile: ProfileShape }>('POST', '/v1/profiles', bootstrap, { clientId: clientA, name: 'pa' })
+    await api<{ profile: ProfileShape }>('POST', '/v1/profiles', bootstrap, {
+      clientId: clientA,
+      name: 'pa',
+    })
   ).json.profile.id;
   profileB = (
-    await api<{ profile: ProfileShape }>('POST', '/v1/profiles', bootstrap, { clientId: clientB, name: 'pb' })
+    await api<{ profile: ProfileShape }>('POST', '/v1/profiles', bootstrap, {
+      clientId: clientB,
+      name: 'pb',
+    })
   ).json.profile.id;
 
   // Operator user scoped to client A; viewer scoped to client A.
@@ -126,7 +145,13 @@ afterAll(async () => {
 describe('RBAC (live)', () => {
   it('reports the identity via /v1/auth/me', async () => {
     const { status, json } = await api<{
-      identity: { kind: string; legacy: boolean; isAdmin: boolean; permissions: string[]; user: UserShape };
+      identity: {
+        kind: string;
+        legacy: boolean;
+        isAdmin: boolean;
+        permissions: string[];
+        user: UserShape;
+      };
     }>('GET', '/v1/auth/me', operatorToken);
     expect(status).toBe(200);
     expect(json.identity.kind).toBe('user');
@@ -160,7 +185,11 @@ describe('RBAC (live)', () => {
     expect(denied.json.error.code).toBe('FORBIDDEN');
 
     // Scoped access works.
-    const allowed = await api<{ profile: ProfileShape }>('GET', `/v1/profiles/${profileA}`, operatorToken);
+    const allowed = await api<{ profile: ProfileShape }>(
+      'GET',
+      `/v1/profiles/${profileA}`,
+      operatorToken,
+    );
     expect(allowed.status).toBe(200);
     expect(allowed.json.profile.id).toBe(profileA);
 
@@ -170,7 +199,11 @@ describe('RBAC (live)', () => {
   });
 
   it('denies launching an out-of-scope profile before touching Chromium', async () => {
-    const { status, json } = await api<ErrorBody>('POST', `/v1/profiles/${profileB}/launch`, operatorToken);
+    const { status, json } = await api<ErrorBody>(
+      'POST',
+      `/v1/profiles/${profileB}/launch`,
+      operatorToken,
+    );
     expect(status).toBe(403);
     expect(json.error.code).toBe('FORBIDDEN');
   });
@@ -208,10 +241,18 @@ describe('RBAC (live)', () => {
   });
 
   it('lets a scoped operator launch and stop their profile', async () => {
-    const launched = await api<{ profile: ProfileShape }>('POST', `/v1/profiles/${profileA}/launch`, operatorToken);
+    const launched = await api<{ profile: ProfileShape }>(
+      'POST',
+      `/v1/profiles/${profileA}/launch`,
+      operatorToken,
+    );
     expect(launched.status).toBe(200);
     expect(launched.json.profile.state).toBe('running');
-    const stopped = await api<{ profile: ProfileShape }>('POST', `/v1/profiles/${profileA}/stop`, operatorToken);
+    const stopped = await api<{ profile: ProfileShape }>(
+      'POST',
+      `/v1/profiles/${profileA}/stop`,
+      operatorToken,
+    );
     expect(stopped.status).toBe(200);
     expect(stopped.json.profile.state).toBe('stopped');
   }, 90_000);
@@ -252,7 +293,9 @@ describe('RBAC (live)', () => {
   });
 
   it('fails closed for disabled users (401 on login and on token use)', async () => {
-    const disabled = await api<{ user: UserShape }>('PATCH', `/v1/users/${operatorId}`, bootstrap, { disabled: true });
+    const disabled = await api<{ user: UserShape }>('PATCH', `/v1/users/${operatorId}`, bootstrap, {
+      disabled: true,
+    });
     expect(disabled.status).toBe(200);
     expect(disabled.json.user.disabled).toBe(true);
 
@@ -268,15 +311,22 @@ describe('RBAC (live)', () => {
     expect(use.json.error.code).toBe('UNAUTHORIZED');
 
     // Re-enable for the remaining tests.
-    const reenabled = await api<{ user: UserShape }>('PATCH', `/v1/users/${operatorId}`, bootstrap, {
-      disabled: false,
-    });
+    const reenabled = await api<{ user: UserShape }>(
+      'PATCH',
+      `/v1/users/${operatorId}`,
+      bootstrap,
+      {
+        disabled: false,
+      },
+    );
     expect(reenabled.status).toBe(200);
     operatorToken = await loginAs('op@example.com', 'operator-password-1');
   });
 
   it('rejects revoked tokens with 401', async () => {
-    const created = await api<{ id: string; token: string }>('POST', '/v1/tokens', bootstrap, { name: 'doomed' });
+    const created = await api<{ id: string; token: string }>('POST', '/v1/tokens', bootstrap, {
+      name: 'doomed',
+    });
     const doomed = created.json.token;
     const revoked = await api('POST', `/v1/tokens/${created.json.id}/revoke`, bootstrap);
     expect(revoked.status).toBe(200);
@@ -386,7 +436,11 @@ describe('RBAC (live)', () => {
       userId: operatorId,
       scopes: ['profiles:read', 'audit:read'],
     });
-    const own = await api<{ entries: { actorId: string }[] }>('GET', '/v1/audit-log?limit=200', scoped.json.token);
+    const own = await api<{ entries: { actorId: string }[] }>(
+      'GET',
+      '/v1/audit-log?limit=200',
+      scoped.json.token,
+    );
     expect(own.status).toBe(200);
     for (const e of own.json.entries) {
       expect(e.actorId).toBe(operatorId);
@@ -402,10 +456,16 @@ describe('RBAC (live)', () => {
     });
     const adminId = admin.json.user.id;
 
-    const removeRole = await api<ErrorBody>('DELETE', `/v1/users/${adminId}/roles/admin`, bootstrap);
+    const removeRole = await api<ErrorBody>(
+      'DELETE',
+      `/v1/users/${adminId}/roles/admin`,
+      bootstrap,
+    );
     expect(removeRole.status).toBe(400);
 
-    const disable = await api<ErrorBody>('PATCH', `/v1/users/${adminId}`, bootstrap, { disabled: true });
+    const disable = await api<ErrorBody>('PATCH', `/v1/users/${adminId}`, bootstrap, {
+      disabled: true,
+    });
     expect(disable.status).toBe(400);
 
     const del = await api<ErrorBody>('DELETE', `/v1/users/${adminId}`, bootstrap);

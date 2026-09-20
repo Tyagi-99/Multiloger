@@ -95,7 +95,12 @@ async function login(ctx: RouteContext): Promise<void> {
   ctx.auditEntityId = created.id;
   sendJson(ctx.res, 201, {
     user: { id: user.id, name: user.name, email: user.email, roles: user.roles },
-    token: { id: created.id, name: created.name, token: created.token, createdAt: created.createdAt },
+    token: {
+      id: created.id,
+      name: created.name,
+      token: created.token,
+      createdAt: created.createdAt,
+    },
   });
 }
 
@@ -105,7 +110,10 @@ async function changePassword(ctx: RouteContext): Promise<void> {
     throw new ValidationError('Legacy tokens cannot change a password: no user is attached');
   }
   const body = requireObjectBody(ctx.body);
-  const currentPassword = getStringField(body, 'currentPassword', { required: true, maxLength: 256 });
+  const currentPassword = getStringField(body, 'currentPassword', {
+    required: true,
+    maxLength: 256,
+  });
   const newPassword = getStringField(body, 'newPassword', { required: true, maxLength: 256 });
   const stored = await getUserPasswordHash(ctx.db, identity.userId);
   if (!stored || !(await verifyPassword(currentPassword ?? '', stored))) {
@@ -279,7 +287,10 @@ async function createInvitationRoute(ctx: RouteContext): Promise<void> {
   const clientIds = getStringArrayField(body, 'clientIds');
   const profileIds = getStringArrayField(body, 'profileIds');
   const expiresRaw = body.expiresInHours;
-  if (expiresRaw !== undefined && (typeof expiresRaw !== 'number' || !Number.isFinite(expiresRaw))) {
+  if (
+    expiresRaw !== undefined &&
+    (typeof expiresRaw !== 'number' || !Number.isFinite(expiresRaw))
+  ) {
     throw new ValidationError('Field must be a number: expiresInHours');
   }
   const created = await createInvitation(ctx.db, {
@@ -364,7 +375,9 @@ async function getAuditLogRoute(ctx: RouteContext): Promise<void> {
   const since = ctx.query.get('since') ?? undefined;
   // Non-admins may only ever see their own actions, regardless of filters.
   const actorId =
-    identity.legacy || identity.isAdmin ? (ctx.query.get('actorId') ?? undefined) : (identity.userId ?? undefined);
+    identity.legacy || identity.isAdmin
+      ? (ctx.query.get('actorId') ?? undefined)
+      : (identity.userId ?? undefined);
   const page = await queryAuditLog(ctx.db, {
     ...(actorId !== undefined ? { actorId } : {}),
     ...(action !== undefined ? { action } : {}),
@@ -384,12 +397,16 @@ async function revokeAnyTokenRoute(ctx: RouteContext): Promise<void> {
   const id = ctx.params.id ?? '';
   if (!identity.legacy && !hasPermission(identity, 'tokens:manage')) {
     // Regular users may only revoke their own tokens.
-    const row = await ctx.db.selectFrom('api_tokens').selectAll().where('id', '=', id).executeTakeFirst();
+    const row = await ctx.db
+      .selectFrom('api_tokens')
+      .selectAll()
+      .where('id', '=', id)
+      .executeTakeFirst();
     if (!row) {
       throw new TokenNotFoundError(id);
     }
     if (row.user_id !== identity.userId) {
-      throw new ValidationError("You can only revoke your own tokens");
+      throw new ValidationError('You can only revoke your own tokens');
     }
   }
   sendJson(ctx.res, 200, { token: await revokeApiToken(ctx.db, id) });

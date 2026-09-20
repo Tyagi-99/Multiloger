@@ -64,7 +64,9 @@ function toPublicToken(row: ApiTokensTable): PublicToken {
   if (row.scopes !== null) {
     try {
       const parsed: unknown = JSON.parse(row.scopes);
-      scopes = Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : null;
+      scopes = Array.isArray(parsed)
+        ? parsed.filter((s): s is string => typeof s === 'string')
+        : null;
     } catch {
       scopes = null;
     }
@@ -91,7 +93,9 @@ function validateScopes(scopes: string[] | undefined): string | null {
   const unique = [...new Set(scopes)];
   for (const scope of unique) {
     if (typeof scope !== 'string' || !KNOWN_PERMISSIONS.has(scope)) {
-      throw new ValidationError(`Unknown permission key in scopes: ${typeof scope === 'string' ? scope : '<non-string>'}`);
+      throw new ValidationError(
+        `Unknown permission key in scopes: ${typeof scope === 'string' ? scope : '<non-string>'}`,
+      );
     }
   }
   return JSON.stringify(unique);
@@ -159,8 +163,15 @@ export class TokenNotFoundError extends Error {
   }
 }
 
-export async function revokeApiToken(db: Kysely<DatabaseSchema>, tokenId: string): Promise<PublicToken> {
-  const row = await db.selectFrom('api_tokens').selectAll().where('id', '=', tokenId).executeTakeFirst();
+export async function revokeApiToken(
+  db: Kysely<DatabaseSchema>,
+  tokenId: string,
+): Promise<PublicToken> {
+  const row = await db
+    .selectFrom('api_tokens')
+    .selectAll()
+    .where('id', '=', tokenId)
+    .executeTakeFirst();
   if (!row) {
     throw new TokenNotFoundError(tokenId);
   }

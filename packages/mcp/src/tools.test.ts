@@ -123,6 +123,7 @@ afterEach(() => {
 /* ------------------------------------------------------------------ */
 
 const EXPECTED_TOOL_NAMES = [
+  'whoami',
   'list_profiles',
   'get_profile_status',
   'launch_profile',
@@ -135,9 +136,11 @@ const EXPECTED_TOOL_NAMES = [
   'get_run_logs',
   'get_run_artifact',
   'cancel_job',
+  'audit_log',
 ];
 
 const GOOD_INPUTS: Record<string, unknown> = {
+  whoami: {},
   list_profiles: {},
   get_profile_status: { profileId: 'prof_1' },
   launch_profile: { profileId: 'prof_1' },
@@ -160,9 +163,11 @@ const GOOD_INPUTS: Record<string, unknown> = {
   get_run_logs: { runId: 'run_1' },
   get_run_artifact: { runId: 'run_1', name: '0.png' },
   cancel_job: { jobId: 'job_1' },
+  audit_log: { action: 'profile.launch', limit: 10 },
 };
 
 const BAD_INPUTS: Record<string, unknown> = {
+  whoami: 'not-an-object',
   list_profiles: 'not-an-object',
   get_profile_status: {},
   launch_profile: { profileId: 42 },
@@ -175,12 +180,13 @@ const BAD_INPUTS: Record<string, unknown> = {
   get_run_logs: {},
   get_run_artifact: { runId: 'run_1', name: 'nope.jpg' },
   cancel_job: { jobId: '' },
+  audit_log: { limit: -5 },
 };
 
 describe('tool inventory', () => {
   const { client } = createMockClient({});
 
-  it('exposes exactly the 12 expected tools', () => {
+  it('exposes exactly the 14 expected tools', () => {
     expect(buildTools(client).map((t) => t.name)).toEqual(EXPECTED_TOOL_NAMES);
   });
 
@@ -652,5 +658,78 @@ describe('tools (mocked API client)', () => {
 
     expect(JSON.stringify(listResult)).not.toContain(TOKEN);
     expect(JSON.stringify(statusResult)).not.toContain(TOKEN);
+  });
+
+  it('whoami reports identity, roles, permissions, and scopes', async () => {
+    const { client, calls } = createMockClient({
+      'GET /v1/auth/me': {
+        identity: {
+          kind: 'user',
+          userId: 'user_1',
+          tokenId: 'tok_1',
+          legacy: false,
+          isAdmin: false,
+          permissions: ['profiles:read', 'profiles:launch', 'audit:read'],
+          scopes: ['profiles:read'],
+          user: { id: 'user_1', name: 'Op', email: 'op@example.com', roles: ['operator'] },
+        },
+      },
+    });
+    const result = await defined(toolsWith(client).get('whoami')).handler({});
+
+    expect(calls).toEqual([{ method: 'GET', path: '/v1/auth/me', body: undefined }]);
+    const text = toolText(result);
+    expect(text).toContain('kind: user');
+    expect(text).toContain('op@example.com');
+    expect(text).toContain('operator');
+    expect(text).toContain('profiles:read');
+    expect(result.isError).not.toBe(true);
+  });
+
+  it('audit_log queries GET /v1/audit-log with filters and renders entries', async () => {
+    const { client, calls } = createMockClient({
+      'GET /v1/audit-log?action=profile.launch&limit=10': {
+        entries: [
+          {
+            id: 'audit_1',
+            at: '2026-09-20T10:00:00.000Z',
+            actorType: 'user',
+            actorId: 'user_1',
+            action: 'profile.launch',
+            entityType: 'profile',
+            entityId: 'prof_1',
+            ip: '127.0.0.1',
+          },
+        ],
+        total: 1,
+        limit: 10,
+        offset: 0,
+      },
+    });
+    const result = await defined(toolsWith(client).get('audit_log')).handler({
+      action: 'profile.launch',
+      limit: 10,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.path).toBe('/v1/audit-log?action=profile.launch&limit=10');
+    const text = toolText(result);
+    expect(text).toContain('profile.launch');
+    expect(text).toContain('actor=user:user_1');
+  });
+
+  it('audit_log surfaces a 403 as a clear tool error (scoped token without audit:read)', async () => {
+    const failing: ApiClientLike = {
+      request: <T>(): Promise<T> =>
+        Promise.reject(new ApiClientError(403, 'FORBIDDEN', 'Missing permission: audit:read')),
+      requestBinary: (): Promise<{ data: Uint8Array; contentType: string }> =>
+        Promise.reject(new Error('unexpected binary call')),
+    };
+    const result = await defined(toolsWith(failing).get('audit_log')).handler({});
+
+    expect(result.isError).toBe(true);
+    const text = toolText(result);
+    expect(text).toContain('FORBIDDEN');
+    expect(text).toContain('audit:read');
   });
 });

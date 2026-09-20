@@ -6,14 +6,19 @@
 
 import type {
   ApiToken,
+  AuditEntry,
   Backup,
   BackupVerification,
   Client,
+  IdentityInfo,
+  InvitationInfo,
   LaunchReadiness,
   ProfileDetail,
   PublicProxy,
   ResourceStatus,
+  RoleInfo,
   Session,
+  TeamUser,
 } from './types.js';
 
 export class ApiError extends Error {
@@ -52,11 +57,19 @@ export interface ApiClient {
   listClients(): Promise<{ clients: Client[] }>;
   createClient(name: string, notes?: string): Promise<{ client: Client }>;
   listProfiles(): Promise<{ profiles: ProfileDetail[] }>;
-  createProfile(clientId: string, name: string, proxyRequired?: boolean): Promise<{ profile: ProfileDetail }>;
+  createProfile(
+    clientId: string,
+    name: string,
+    proxyRequired?: boolean,
+  ): Promise<{ profile: ProfileDetail }>;
   getProfile(id: string): Promise<{ profile: ProfileDetail }>;
-  launchProfile(id: string): Promise<{ profile: ProfileDetail; cdp: { pid: number; port: number; cdpUrl: string } }>;
+  launchProfile(
+    id: string,
+  ): Promise<{ profile: ProfileDetail; cdp: { pid: number; port: number; cdpUrl: string } }>;
   stopProfile(id: string): Promise<{ profile: ProfileDetail }>;
-  restartProfile(id: string): Promise<{ profile: ProfileDetail; cdp: { pid: number; port: number; cdpUrl: string } }>;
+  restartProfile(
+    id: string,
+  ): Promise<{ profile: ProfileDetail; cdp: { pid: number; port: number; cdpUrl: string } }>;
   launchReadiness(id: string): Promise<LaunchReadiness>;
   getSessions(id: string): Promise<{ sessions: Session[] }>;
   assignProxy(profileId: string, proxyId: string): Promise<{ profile: ProfileDetail }>;
@@ -77,13 +90,78 @@ export interface ApiClient {
   checkProxyHealth(id: string): Promise<{ proxy: PublicProxy; health: unknown }>;
 
   listTokens(): Promise<{ tokens: ApiToken[] }>;
-  createToken(name: string): Promise<{ token: ApiToken; plaintext: string }>;
+  createToken(
+    name: string,
+  ): Promise<{ id: string; name: string; token: string; createdAt: string }>;
   revokeToken(id: string): Promise<{ token: ApiToken }>;
+
+  getIdentity(): Promise<{ identity: IdentityInfo }>;
+  loginWithPassword(email: string, password: string): Promise<{ token: string }>;
+  changePassword(currentPassword: string, newPassword: string): Promise<{ changed: boolean }>;
+
+  listUsers(): Promise<{ users: TeamUser[] }>;
+  createUser(input: {
+    name: string;
+    email: string;
+    password: string;
+    roleIds?: string[];
+  }): Promise<{ user: TeamUser }>;
+  updateUser(id: string, patch: { name?: string; disabled?: boolean }): Promise<{ user: TeamUser }>;
+  deleteUser(id: string): Promise<{ deleted: boolean }>;
+  assignRole(userId: string, roleId: string): Promise<{ user: TeamUser }>;
+  removeRole(userId: string, roleId: string): Promise<{ user: TeamUser }>;
+  grantClientAccess(userId: string, clientId: string): Promise<{ granted: boolean }>;
+  revokeClientAccess(userId: string, clientId: string): Promise<{ revoked: boolean }>;
+  grantProfileAccess(userId: string, profileId: string): Promise<{ granted: boolean }>;
+  revokeProfileAccess(userId: string, profileId: string): Promise<{ revoked: boolean }>;
+  getUserScopes(userId: string): Promise<{ scopes: { clients: string[]; profiles: string[] } }>;
+  listUserTokens(userId: string): Promise<{ tokens: ApiToken[] }>;
+  issueUserToken(
+    userId: string,
+    name: string,
+    scopes?: string[],
+  ): Promise<{ id: string; name: string; token: string; createdAt: string }>;
+
+  listRoles(): Promise<{ roles: RoleInfo[] }>;
+  createRole(input: {
+    id: string;
+    name: string;
+    description?: string;
+    permissions: string[];
+  }): Promise<{
+    role: RoleInfo;
+  }>;
+  deleteRole(id: string): Promise<{ deleted: boolean }>;
+
+  listInvitations(): Promise<{ invitations: InvitationInfo[] }>;
+  createInvitation(input: {
+    email: string;
+    roleId: string;
+    clientIds?: string[];
+    profileIds?: string[];
+    expiresInHours?: number;
+  }): Promise<{ invitation: InvitationInfo; token: string }>;
+  revokeInvitation(id: string): Promise<{ revoked: boolean }>;
+
+  queryAuditLog(params?: {
+    action?: string;
+    actorId?: string;
+    entityType?: string;
+    entityId?: string;
+    since?: string;
+    until?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ entries: AuditEntry[]; total: number; limit: number; offset: number }>;
 
   createBackup(profileId: string): Promise<{ backup: Backup }>;
   listBackups(profileId: string): Promise<{ backups: Backup[] }>;
   verifyBackup(backupId: string): Promise<BackupVerification>;
-  restoreBackup(backupId: string, name: string, clientId?: string): Promise<{ profile: ProfileDetail }>;
+  restoreBackup(
+    backupId: string,
+    name: string,
+    clientId?: string,
+  ): Promise<{ profile: ProfileDetail }>;
   deleteBackup(backupId: string): Promise<{ deleted: boolean }>;
 
   resourceStatus(): Promise<ResourceStatus>;
@@ -107,7 +185,11 @@ export function createApiClient(baseUrl: string, getToken: () => string | null):
     try {
       res = await fetch(`${baseUrl}${path}`, init);
     } catch (error) {
-      throw new ApiError(0, 'NETWORK_ERROR', error instanceof Error ? error.message : 'Network request failed');
+      throw new ApiError(
+        0,
+        'NETWORK_ERROR',
+        error instanceof Error ? error.message : 'Network request failed',
+      );
     }
     const text = await res.text();
     let json: unknown = null;
@@ -162,16 +244,77 @@ export function createApiClient(baseUrl: string, getToken: () => string | null):
     getSessions: (id) => get<{ sessions: Session[] }>(`/v1/profiles/${id}/sessions`),
     assignProxy: (profileId, proxyId) =>
       post<{ profile: ProfileDetail }>(`/v1/profiles/${profileId}/proxy`, { proxyId }),
-    unassignProxy: (profileId) => del<{ profile: ProfileDetail }>(`/v1/profiles/${profileId}/proxy`),
+    unassignProxy: (profileId) =>
+      del<{ profile: ProfileDetail }>(`/v1/profiles/${profileId}/proxy`),
 
     listProxies: () => get<{ proxies: PublicProxy[] }>('/v1/proxies'),
     createProxy: (input) => post<{ proxy: PublicProxy }>('/v1/proxies', input),
     deleteProxy: (id) => del<{ deleted: boolean }>(`/v1/proxies/${id}`),
-    checkProxyHealth: (id) => post<{ proxy: PublicProxy; health: unknown }>(`/v1/proxies/${id}/health`),
+    checkProxyHealth: (id) =>
+      post<{ proxy: PublicProxy; health: unknown }>(`/v1/proxies/${id}/health`),
 
     listTokens: () => get<{ tokens: ApiToken[] }>('/v1/tokens'),
-    createToken: (name) => post<{ token: ApiToken; plaintext: string }>('/v1/tokens', { name }),
+    createToken: (name) =>
+      post<{ id: string; name: string; token: string; createdAt: string }>('/v1/tokens', { name }),
     revokeToken: (id) => post<{ token: ApiToken }>(`/v1/tokens/${id}/revoke`),
+
+    getIdentity: () => get<{ identity: IdentityInfo }>('/v1/auth/me'),
+    loginWithPassword: (email, password) =>
+      post<{
+        user: TeamUser;
+        token: { id: string; name: string; token: string; createdAt: string };
+      }>('/v1/auth/login', { email, password }).then((res) => ({ token: res.token.token })),
+    changePassword: (currentPassword, newPassword) =>
+      post<{ changed: boolean }>('/v1/auth/password', { currentPassword, newPassword }),
+
+    listUsers: () => get<{ users: TeamUser[] }>('/v1/users'),
+    createUser: (input) => post<{ user: TeamUser }>('/v1/users', input),
+    updateUser: (id, updates) => patch<{ user: TeamUser }>(`/v1/users/${id}`, updates),
+    deleteUser: (id) => del<{ deleted: boolean }>(`/v1/users/${id}`),
+    assignRole: (userId, roleId) =>
+      post<{ user: TeamUser }>(`/v1/users/${userId}/roles`, { roleId }),
+    removeRole: (userId, roleId) => del<{ user: TeamUser }>(`/v1/users/${userId}/roles/${roleId}`),
+    grantClientAccess: (userId, clientId) =>
+      post<{ granted: boolean }>(`/v1/users/${userId}/clients`, { clientId }),
+    revokeClientAccess: (userId, clientId) =>
+      del<{ revoked: boolean }>(`/v1/users/${userId}/clients/${clientId}`),
+    grantProfileAccess: (userId, profileId) =>
+      post<{ granted: boolean }>(`/v1/users/${userId}/profiles`, { profileId }),
+    revokeProfileAccess: (userId, profileId) =>
+      del<{ revoked: boolean }>(`/v1/users/${userId}/profiles/${profileId}`),
+    getUserScopes: (userId) =>
+      get<{ scopes: { clients: string[]; profiles: string[] } }>(`/v1/users/${userId}/scopes`),
+    listUserTokens: (userId) => get<{ tokens: ApiToken[] }>(`/v1/users/${userId}/tokens`),
+    issueUserToken: (userId, name, scopes) =>
+      post<{ id: string; name: string; token: string; createdAt: string }>(
+        `/v1/users/${userId}/tokens`,
+        scopes === undefined ? { name } : { name, scopes },
+      ),
+
+    listRoles: () => get<{ roles: RoleInfo[] }>('/v1/roles'),
+    createRole: (input) => post<{ role: RoleInfo }>('/v1/roles', input),
+    deleteRole: (id) => del<{ deleted: boolean }>(`/v1/roles/${id}`),
+
+    listInvitations: () => get<{ invitations: InvitationInfo[] }>('/v1/invitations'),
+    createInvitation: (input) =>
+      post<{ invitation: InvitationInfo; token: string }>('/v1/invitations', input),
+    revokeInvitation: (id) => post<{ revoked: boolean }>(`/v1/invitations/${id}/revoke`),
+
+    queryAuditLog: (params) => {
+      const query = new URLSearchParams();
+      const entries: [string, string | number][] = params
+        ? (Object.entries(params) as [string, string | number | undefined][]).flatMap(
+            ([key, value]) => (value === undefined ? [] : [[key, value]]),
+          )
+        : [];
+      for (const [key, value] of entries) {
+        query.set(key, String(value));
+      }
+      const suffix = query.toString();
+      return get<{ entries: AuditEntry[]; total: number; limit: number; offset: number }>(
+        suffix ? `/v1/audit-log?${suffix}` : '/v1/audit-log',
+      );
+    },
 
     createBackup: (profileId) => post<{ backup: Backup }>(`/v1/profiles/${profileId}/backups`),
     listBackups: (profileId) => get<{ backups: Backup[] }>(`/v1/profiles/${profileId}/backups`),
