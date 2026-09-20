@@ -10,7 +10,7 @@ import { createServer, type Server as HttpServer, type Socket } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { decodeClientFrame, encodeTextFrame } from '../server/websocket.js';
 import { findFreePort } from './ports.js';
-import { closeBrowserViaCdp, getDebuggerWsUrl, sendCdpCommand } from './cdp.js';
+import { closeBrowserViaCdp, createCdpEventSession, getDebuggerWsUrl, sendCdpCommand } from './cdp.js';
 
 type CloseBehavior = 'ack' | 'ack-then-close' | 'close-no-ack' | 'never';
 
@@ -208,5 +208,171 @@ describe('closeBrowserViaCdp', () => {
   it('returns false (never throws) when nothing listens', async () => {
     const port = await findFreePort();
     await expect(closeBrowserViaCdp(`http://127.0.0.1:${String(port)}`, 400)).resolves.toBe(false);
+  });
+});
+
+describe('createCdpEventSession', () => {
+  interface EventFake {
+    wsUrl: string;
+    received: { id: number; method: string; params: unknown }[];
+    shutdown: () => Promise<void>;
+  }
+
+  /**
+   * Fake CDP endpoint that acks every command and, right after acking
+   * Fetch.enable, emits a Fetch.authRequired event broadcast (no id).
+   */
+  async function startEventFake(): Promise<EventFake> {
+    const port = await findFreePort();
+    const received: EventFake['received'] = [];
+
+    const server: HttpServer = createServer((socket: Socket) => {
+      let head = Buffer.alloc(0);
+      let upgraded = false;
+      let wsBuffer = Buffer.alloc(0);
+
+      socket.on('data', (chunk: Buffer) => {
+        if (!upgraded) {
+          head = Buffer.concat([head, chunk]);
+          const text = head.toString('utf8');
+          if (!text.includes('\r\n\r\n')) {
+            return;
+          }
+          const headerLines = text.split('\r\n').slice(1);
+          if (text.includes('Upgrade: websocket')) {
+            const keyLine = headerLines.find((l) =>
+              l.toLowerCase().startsWith('sec-websocket-key:'),
+            );
+            const key = (keyLine ?? '').split(':')[1]?.trim() ?? '';
+            socket.write(
+              'HTTP/1.1 101 Switching Protocols\r\n' +
+                'Upgrade: websocket\r\n' +
+                'Connection: Upgrade\r\n' +
+                `Sec-WebSocket-Accept: ${wsAccept(key)}\r\n\r\n`,
+            );
+            upgraded = true;
+            const rest = head.subarray(text.indexOf('\r\n\r\n') + 4);
+            if (rest.length > 0) {
+              wsBuffer = Buffer.concat([wsBuffer, rest]);
+              socket.emit('data', Buffer.alloc(0));
+            }
+            return;
+          }
+          socket.write('HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n');
+          socket.end();
+          return;
+        }
+
+        wsBuffer = Buffer.concat([wsBuffer, chunk]);
+        for (;;) {
+          const frame = decodeClientFrame(wsBuffer);
+          if (frame.consumed === 0) {
+            break;
+          }
+          wsBuffer = wsBuffer.subarray(frame.consumed);
+          if (frame.opcode !== 0x1) {
+            continue;
+          }
+          let msg: { id?: number; method?: string; params?: unknown };
+          try {
+            msg = JSON.parse(frame.payload.toString('utf8')) as {
+              id?: number;
+              method?: string;
+              params?: unknown;
+            };
+          } catch {
+            continue;
+          }
+          if (typeof msg.id !== 'number' || typeof msg.method !== 'string') {
+            continue;
+          }
+          received.push({ id: msg.id, method: msg.method, params: msg.params });
+          socket.write(
+            encodeTextFrame(Buffer.from(JSON.stringify({ id: msg.id, result: {} }), 'utf8')),
+          );
+          if (msg.method === 'Fetch.enable') {
+            socket.write(
+              encodeTextFrame(
+                Buffer.from(
+                  JSON.stringify({
+                    method: 'Fetch.authRequired',
+                    params: {
+                      requestId: 'req-1',
+                      authChallenge: { source: 'proxy', origin: 'http://127.0.0.1:8080' },
+                    },
+                  }),
+                  'utf8',
+                ),
+              ),
+            );
+          }
+        }
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.on('error', reject);
+      server.listen(port, '127.0.0.1', () => {
+        resolve();
+      });
+    });
+
+    return {
+      wsUrl: `ws://127.0.0.1:${String(port)}/devtools/browser/fake`,
+      received,
+      shutdown: () =>
+        new Promise<void>((resolve) => {
+          server.close(() => {
+            resolve();
+          });
+        }),
+    };
+  }
+
+  async function waitForEvents(events: unknown[], timeoutMs = 5000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (events.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  it('dispatches event broadcasts to registered handlers while send() keeps working', async () => {
+    const fake = await startEventFake();
+    try {
+      const session = await createCdpEventSession(fake.wsUrl, 2000);
+      const events: unknown[] = [];
+      session.onEvent('Fetch.authRequired', (params) => {
+        events.push(params);
+      });
+
+      const result = await session.send('Fetch.enable', { handleAuthRequests: true });
+      expect(result).toEqual({});
+      expect(fake.received.map((r) => r.method)).toContain('Fetch.enable');
+
+      await waitForEvents(events);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        requestId: 'req-1',
+        authChallenge: { source: 'proxy' },
+      });
+
+      session.close();
+      await session.closed;
+    } finally {
+      await fake.shutdown();
+    }
+  });
+
+  it('does not disturb sendCdpCommand: events are ignored without registered handlers', async () => {
+    const fake = await startEventFake();
+    try {
+      // The fake emits a Fetch.authRequired broadcast right after acking
+      // Fetch.enable; sendCdpCommand registers no handlers, so the broadcast
+      // must be dropped exactly like before and the command must resolve.
+      const result = await sendCdpCommand(fake.wsUrl, 'Fetch.enable', { handleAuthRequests: true }, 2000);
+      expect(result).toEqual({});
+    } finally {
+      await fake.shutdown();
+    }
   });
 });

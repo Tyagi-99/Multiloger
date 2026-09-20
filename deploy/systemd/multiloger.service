@@ -1,0 +1,38 @@
+[Unit]
+Description=Multiloger API + dashboard (multi-profile browser control plane)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=multiloger
+Group=multiloger
+WorkingDirectory=/opt/multiloger/app
+
+# Secrets and config live here — never on the command line, never in git.
+# /etc/multiloger/multiloger.env must be 0600 (see deploy/systemd/multiloger.env.example).
+EnvironmentFile=/etc/multiloger/multiloger.env
+
+# Bind loopback only; nginx terminates TLS in front of this (see deploy/nginx).
+ExecStart=/usr/bin/node /opt/multiloger/app/packages/api/dist/cli.js \
+  --host 127.0.0.1 \
+  --port 3000 \
+  --data-dir /var/lib/multiloger/data
+
+Restart=on-failure
+RestartSec=5
+# Chromium children must die with the service — no orphaned browsers.
+KillMode=control-group
+
+# Hardening: the API needs its data dir, /tmp, and a browser binary — nothing else writable.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/multiloger/data
+# If Chromium lives outside the default PATH locations, allow-list it, e.g.:
+# ReadWritePaths=/var/lib/multiloger/data /opt/meta-chromium
+# (Chromium itself needs read access to its install dir; add it via BindReadOnlyPaths= if strict mode blocks it.)
+
+[Install]
+WantedBy=multi-user.target

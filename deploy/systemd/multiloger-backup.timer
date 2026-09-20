@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Multiloger profile backups daily
+
+[Timer]
+# Daily at 03:30 local time; catch up once if the machine was off.
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

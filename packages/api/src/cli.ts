@@ -110,7 +110,10 @@ Options:
 Environment (MULTILOGER_*), overridden by flags:
   MULTILOGER_HOST, MULTILOGER_PORT, MULTILOGER_DATA_DIR, MULTILOGER_DB_PATH,
   MULTILOGER_CHROMIUM_PATH, MULTILOGER_WEB_DIR, MULTILOGER_HEADLESS,
-  MULTILOGER_BACKUP_KEY, MULTILOGER_BACKUP_KEY_FILE
+  MULTILOGER_BACKUP_KEY, MULTILOGER_BACKUP_KEY_FILE,
+  MULTILOGER_VAULT_KEY, MULTILOGER_VAULT_KEY_FILE, MULTILOGER_VAULT_PATH
+  (vault key: 64 hex chars, like the backup key; vault path defaults to
+  <data-dir>/vault.mlvault and holds proxy credentials encrypted at rest)
 
 On first start with no API tokens, a bootstrap token is printed ONCE —
 save it, then create a named token via the dashboard or API.

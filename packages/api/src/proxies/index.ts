@@ -26,9 +26,12 @@ export {
 export {
   resolveProxyForLaunch,
   resolveProxyCredentials,
+  resolveProxyAuthForLaunch,
   ProxyCredentialError,
   ProxyRequiredError,
   ProxyUnhealthyError,
+  type ProxyAuthConfig,
   type ResolvedProxyCredentials,
 } from './service.js';
+export { attachProxyAuth, type ProxyAuthHandle } from './auth-handler.js';
 export type { ProxyFlagOptions } from '../browser/flags.js';

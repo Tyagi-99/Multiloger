@@ -1,0 +1,14 @@
+[Unit]
+Description=Multiloger scheduled backup of all profiles
+After=multiloger.service
+Requires=multiloger.service
+
+[Service]
+Type=oneshot
+User=multiloger
+Group=multiloger
+# Same secrets file so the script can authenticate to the API.
+EnvironmentFile=/etc/multiloger/multiloger.env
+ExecStart=/opt/multiloger/backup-all.sh
+# The script needs an API token: put it in the env file as MULTILOGER_CRON_TOKEN
+# (create a dedicated token named "backup-cron" via the dashboard or API and revoke it if leaked).

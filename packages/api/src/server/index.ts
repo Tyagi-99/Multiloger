@@ -27,7 +27,8 @@ import { getState } from '../profiles/stateMachine.js';
 import { ResourceManager, type ResourceManagerOptions } from '../resources/manager.js';
 import { BackupService } from '../backups/service.js';
 import { findStaticFile, resolveStaticFile, serveStaticFile } from './static.js';
-import { resolveProxyForLaunch } from '../proxies/service.js';
+import { resolveProxyAuthForLaunch, resolveProxyForLaunch } from '../proxies/service.js';
+import { resolveVaultPath } from '../vault/index.js';
 import { authenticateRequest, createApiToken } from './tokens.js';
 import { TokenBucketLimiter, type RateLimitOptions } from './rateLimit.js';
 import { buildRoutes } from './routes.js';
@@ -127,11 +128,17 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
   }
   const resources = new ResourceManager(resourceOptions);
 
+  const vaultPath = resolveVaultPath(options.dataDir);
   const manager = new ProfileManager(db, {
     dataDir: options.dataDir,
     headless: options.headless ?? true,
     lockTtlMs: options.lockTtlMs ?? 30_000,
-    resolveProxy: (profileId: string) => resolveProxyForLaunch(db, profileId),
+    resolveProxy: (profileId: string) => resolveProxyForLaunch(db, profileId, 5000, { vaultPath }),
+    // Authenticated proxies: credentials come only from the vault; the CDP
+    // Fetch.continueWithAuth handler is attached after launch and closed on
+    // stop/crash. Non-vault credentialed proxies keep failing closed (409).
+    resolveProxyAuth: (profileId: string) =>
+      resolveProxyAuthForLaunch(db, profileId, { vaultPath }),
     resources,
   });
 

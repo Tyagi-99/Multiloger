@@ -3,8 +3,8 @@
  * repository and the launcher reject the same malformed endpoints.
  *
  * Credential rule: the password itself is NEVER stored. `passwordSecretRef`
- * must be of the form `env:VAR_NAME` (or omitted); anything else is
- * rejected at write time.
+ * must be of the form `env:VAR_NAME` or `vault:<secret-name>` (or omitted);
+ * anything else is rejected at write time.
  */
 
 import type { Kysely } from 'kysely';
@@ -28,7 +28,7 @@ export class InvalidSecretRefError extends Error {
   constructor(readonly ref: string) {
     super(
       `Invalid password_secret_ref ${JSON.stringify(ref)}: ` +
-        'must be of the form "env:VAR_NAME"; plaintext secrets are never stored',
+        'must be of the form "env:VAR_NAME" or "vault:<secret-name>"; plaintext secrets are never stored',
     );
     this.name = 'InvalidSecretRefError';
   }
@@ -111,12 +111,13 @@ function assertManagedScheme(scheme: string): asserts scheme is ManagedProxySche
 }
 
 const ENV_REF_PATTERN = /^env:[A-Za-z_][A-Za-z0-9_]*$/;
+const VAULT_REF_PATTERN = /^vault:[A-Za-z0-9_.-]{1,100}$/;
 
 export function assertValidSecretRef(ref: string | null | undefined): void {
   if (ref === null || ref === undefined) {
     return;
   }
-  if (!ENV_REF_PATTERN.test(ref)) {
+  if (!ENV_REF_PATTERN.test(ref) && !VAULT_REF_PATTERN.test(ref)) {
     throw new InvalidSecretRefError(ref);
   }
 }

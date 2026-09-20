@@ -30,6 +30,8 @@ import { getProfile } from './repository.js';
 import { endSession, startSession, type SessionExitReason } from './sessions.js';
 import { ensureWebrtcPolicy } from '../proxies/leak-guards.js';
 import type { ResourceManager } from '../resources/manager.js';
+import type { ProxyAuthConfig } from '../proxies/service.js';
+import type { ProxyAuthHandle } from '../proxies/auth-handler.js';
 
 /** Upper bound for the graceful raw-CDP Browser.close attempt during stop. */
 const CDP_CLOSE_TIMEOUT_MS = 10_000;
@@ -88,10 +90,19 @@ interface LiveProfile extends LiveProfileInfo {
   /** Guards finalize/crash paths against double execution. */
   settled: boolean;
   consecutiveCdpFailures: number;
+  /** Attached CDP proxy-auth session (vault-credentialed proxies only). */
+  proxyAuth?: ProxyAuthHandle | undefined;
 }
 
 /** Task 6 seam: resolves proxy flags for a profile before launch. */
 export type ProxyResolver = (profileId: string) => Promise<ProxyFlagOptions | undefined>;
+
+/**
+ * Proxy-auth seam: resolves the CDP Fetch.continueWithAuth configuration for
+ * a profile. Returns undefined when the assigned proxy needs no auth. The
+ * password lives only inside the returned getCredentials closure.
+ */
+export type ProxyAuthResolver = (profileId: string) => Promise<ProxyAuthConfig | undefined>;
 
 export interface ProfileManagerOptions {
   /** Root directory all profile user-data dirs live under (used for orphan scans). */
@@ -104,6 +115,12 @@ export interface ProfileManagerOptions {
   monitorIntervalMs?: number;
   /** Optional proxy resolution hook (wired by Task 6). */
   resolveProxy?: ProxyResolver;
+  /**
+   * Optional proxy-auth hook: when it returns a config, a CDP
+   * Fetch.continueWithAuth handler is attached to the browser for the
+   * session (vault-credentialed proxies only).
+   */
+  resolveProxyAuth?: ProxyAuthResolver;
   /** Optional resource governor (Task 8): concurrency cap + launch queue. */
   resources?: ResourceManager;
   /**
@@ -142,6 +159,7 @@ export class ProfileManager {
   private readonly headless: boolean;
   private readonly monitorIntervalMs: number;
   private readonly resolveProxy: ProxyResolver | undefined;
+  private readonly resolveProxyAuth: ProxyAuthResolver | undefined;
   private readonly resources: ResourceManager | undefined;
   private readonly gracefulClose: (cdpUrl: string, timeoutMs: number) => Promise<boolean>;
   private readonly live = new Map<string, LiveProfile>();
@@ -156,6 +174,7 @@ export class ProfileManager {
     this.headless = options.headless ?? true;
     this.monitorIntervalMs = options.monitorIntervalMs ?? 10_000;
     this.resolveProxy = options.resolveProxy;
+    this.resolveProxyAuth = options.resolveProxyAuth;
     this.resources = options.resources;
     this.gracefulClose = options.gracefulClose ?? closeBrowserViaCdp;
   }
@@ -294,6 +313,25 @@ export class ProfileManager {
     });
     this.live.set(profileId, entry);
 
+    // Vault-credentialed proxy: attach the CDP proxy-auth handler before the
+    // profile is marked running. Fail closed — a handler that cannot attach
+    // (or a resolver that cannot resolve) must not leave a browser running
+    // that would send traffic unauthenticated.
+    if (this.resolveProxyAuth) {
+      try {
+        const authConfig = await this.resolveProxyAuth(profileId);
+        if (authConfig) {
+          // Loaded lazily: the auth handler (and its vault dependency) is
+          // only needed when a profile actually uses proxy authentication.
+          const { attachProxyAuth } = await import('../proxies/auth-handler.js');
+          entry.proxyAuth = await attachProxyAuth(browser.wsUrl, authConfig.getCredentials);
+        }
+      } catch (error) {
+        await this.abortLaunchedEntry(entry);
+        throw error;
+      }
+    }
+
     try {
       await transitionState(this.db, profileId, 'running');
     } catch (error) {
@@ -310,12 +348,28 @@ export class ProfileManager {
     return { profileId, pid: browser.pid, port: browser.port, cdpUrl: browser.cdpUrl };
   }
 
+  /**
+   * Best-effort synchronous teardown of the attached CDP proxy-auth
+   * session, if any. The browser is going away on every path that calls
+   * this; the socket would die on its own, but an explicit close is cleaner.
+   */
+  private closeProxyAuth(entry: LiveProfile): void {
+    const handle = entry.proxyAuth;
+    entry.proxyAuth = undefined;
+    if (handle) {
+      try {
+        handle.close();
+      } catch {
+        // Best effort: never mask the real finalization work.
+      }
+    }
+  }
+
   private async markLaunchFailed(
     profileId: string,
     owner: string,
     state: 'error',
-  ): Promise<void> {
-    try {
+  ): Promise<void> {    try {
       const current = await getState(this.db, profileId);
       if (current === 'launching') {
         await transitionState(this.db, profileId, state);
@@ -330,6 +384,7 @@ export class ProfileManager {
   private async abortLaunchedEntry(entry: LiveProfile): Promise<void> {
     this.live.delete(entry.profileId);
     entry.settled = true;
+    this.closeProxyAuth(entry);
     killBrowserGroup(entry.pid, 'SIGKILL');
     await endSession(this.db, entry.sessionId, 'error').catch(() => undefined);
     try {
@@ -450,6 +505,7 @@ export class ProfileManager {
     }
     entry.settled = true;
     this.live.delete(entry.profileId);
+    this.closeProxyAuth(entry);
 
     await endSession(this.db, entry.sessionId, reason).catch(() => undefined);
     try {
@@ -492,6 +548,7 @@ export class ProfileManager {
     }
     entry.settled = true;
     this.live.delete(entry.profileId);
+    this.closeProxyAuth(entry);
 
     await endSession(this.db, entry.sessionId, 'crashed').catch(() => undefined);
     try {

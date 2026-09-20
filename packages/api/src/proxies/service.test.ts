@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
+import { randomBytes } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Kysely } from 'kysely';
 import type { DatabaseSchema } from '../db/schema.js';
@@ -12,16 +13,21 @@ import { getState } from '../profiles/stateMachine.js';
 import { getLockInfo } from '../profiles/lock.js';
 import { ProfileManager } from '../profiles/manager.js';
 import { findFreePort } from '../browser/ports.js';
+import { storeSecret } from '../vault/index.js';
 import {
   assignProxyToProfile,
+  assertValidSecretRef,
   createProxy,
+  InvalidSecretRefError,
   setProxyRequired,
+  type ProxyRecord,
 } from './repository.js';
 import {
   ProxyAuthUnsupportedError,
   ProxyCredentialError,
   ProxyRequiredError,
   ProxyUnhealthyError,
+  resolveProxyAuthForLaunch,
   resolveProxyCredentials,
   resolveProxyForLaunch,
 } from './service.js';
@@ -59,6 +65,8 @@ describe('proxy launch gate', () => {
       fixture = undefined;
     }
     delete process.env.TEST_PROXY_PASSWORD;
+    delete process.env.MULTILOGER_VAULT_PATH;
+    delete process.env.MULTILOGER_VAULT_KEY;
   });
 
   /** A dummy TCP listener that passes the health check (no real proxying). */
@@ -255,4 +263,271 @@ describe('proxy launch gate', () => {
       await manager.shutdown();
     }
   }, 60_000);
+
+  it('fails a manager launch closed when the proxy-auth resolver throws: browser killed, state error, lock released', async () => {
+    fixture = await setup();
+    const { db, dir, profileId } = fixture;
+    const port = await dummyProxy();
+    const proxy = await createProxy(db, {
+      name: 'plain',
+      scheme: 'http',
+      host: '127.0.0.1',
+      port,
+    });
+    await assignProxyToProfile(db, profileId, proxy.id);
+
+    const manager = new ProfileManager(db, {
+      dataDir: dir,
+      lockTtlMs: 10_000,
+      resolveProxy: (id) => resolveProxyForLaunch(db, id, 2000),
+      resolveProxyAuth: () => {
+        throw new Error('vault exploded');
+      },
+    });
+    manager.start();
+    try {
+      // The proxy gate passes, so Chromium actually spawns — then the
+      // resolver throws and the launch must fail closed: browser killed,
+      // error state, lock released, nothing left live.
+      await expect(manager.launchProfile(profileId)).rejects.toThrow('vault exploded');
+      expect(await getState(db, profileId)).toBe('error');
+      expect((await getLockInfo(db, profileId, 10_000)).active).toBe(false);
+      expect(manager.isLive(profileId)).toBe(false);
+    } finally {
+      await manager.shutdown();
+    }
+  }, 60_000);
+});
+
+describe('vault-backed proxy credentials', () => {
+  let fixture: Fixture | undefined;
+  const servers: { close: () => void }[] = [];
+
+  afterEach(async () => {
+    for (const s of servers.splice(0)) {
+      s.close();
+    }
+    if (fixture) {
+      await closeDatabase(fixture.db);
+      rmSync(fixture.dir, { recursive: true, force: true });
+      fixture = undefined;
+    }
+    delete process.env.MULTILOGER_VAULT_PATH;
+    delete process.env.MULTILOGER_VAULT_KEY;
+  });
+
+  /** A dummy TCP listener that passes the health check (no real proxying). */
+  async function dummyProxy(): Promise<number> {
+    const server = createServer();
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        resolve();
+      });
+    });
+    servers.push(server);
+    const address = server.address();
+    return typeof address === 'object' && address ? address.port : 0;
+  }
+
+  /** Store secrets in a real encrypted vault file under the fixture dir. */
+  function useVault(dir: string, secrets: Record<string, string>): string {
+    const vaultPath = join(dir, 'vault.mlvault');
+    process.env.MULTILOGER_VAULT_KEY = randomBytes(32).toString('hex');
+    process.env.MULTILOGER_VAULT_PATH = vaultPath;
+    for (const [name, value] of Object.entries(secrets)) {
+      storeSecret(vaultPath, name, value);
+    }
+    return vaultPath;
+  }
+
+  function vaultRecord(): ProxyRecord {
+    return {
+      id: 'proxy-1',
+      name: 'vaulted',
+      scheme: 'http',
+      host: '127.0.0.1',
+      port: 8080,
+      username: 'alice',
+      password_secret_ref: 'vault:proxy-password',
+      bypass: null,
+      notes: null,
+      created_at: '',
+      updated_at: '',
+    };
+  }
+
+  async function assignVaultProxy(port: number): Promise<{ db: Fixture['db']; profileId: string; proxyId: string }> {
+    fixture = await setup();
+    const { db, profileId } = fixture;
+    const proxy = await createProxy(db, {
+      name: 'vault-auth',
+      scheme: 'http',
+      host: '127.0.0.1',
+      port,
+      username: 'alice',
+      passwordSecretRef: 'vault:proxy-password',
+    });
+    await assignProxyToProfile(db, profileId, proxy.id);
+    return { db, profileId, proxyId: proxy.id };
+  }
+
+  it('assertValidSecretRef accepts vault: refs and rejects malformed ones', () => {
+    expect(() => { assertValidSecretRef('vault:proxy-password'); }).not.toThrow();
+    expect(() => { assertValidSecretRef('vault:a'); }).not.toThrow();
+    expect(() => { assertValidSecretRef('vault:my.secret_1-2'); }).not.toThrow();
+    expect(() => { assertValidSecretRef(`vault:${'x'.repeat(100)}`); }).not.toThrow();
+    expect(() => { assertValidSecretRef('vault:'); }).toThrow(InvalidSecretRefError);
+    expect(() => { assertValidSecretRef('vault:bad name'); }).toThrow(InvalidSecretRefError);
+    expect(() => { assertValidSecretRef('vault:bad/name'); }).toThrow(InvalidSecretRefError);
+    expect(() => { assertValidSecretRef(`vault:${'x'.repeat(101)}`); }).toThrow(InvalidSecretRefError);
+    // env: refs keep working; plaintext is still rejected.
+    expect(() => { assertValidSecretRef('env:FOO'); }).not.toThrow();
+    expect(() => { assertValidSecretRef('hunter2'); }).toThrow(InvalidSecretRefError);
+    expect(() => { assertValidSecretRef(null); }).not.toThrow();
+    expect(() => { assertValidSecretRef(undefined); }).not.toThrow();
+  });
+
+  it('resolves vault: refs from the vault (explicit path and MULTILOGER_VAULT_PATH)', async () => {
+    fixture = await setup();
+    const vaultPath = useVault(fixture.dir, { 'proxy-password': 's3cret' });
+
+    expect(resolveProxyCredentials(vaultRecord(), { vaultPath })).toEqual({
+      username: 'alice',
+      password: 's3cret',
+    });
+    // Falls back to MULTILOGER_VAULT_PATH when no explicit path is given.
+    expect(resolveProxyCredentials(vaultRecord())).toEqual({
+      username: 'alice',
+      password: 's3cret',
+    });
+  });
+
+  it('throws ProxyCredentialError when the vault secret is missing', async () => {
+    fixture = await setup();
+    const vaultPath = useVault(fixture.dir, { 'other-secret': 'x' });
+    expect(() => resolveProxyCredentials(vaultRecord(), { vaultPath })).toThrow(ProxyCredentialError);
+  });
+
+  it('throws ProxyCredentialError when no vault path is configured', async () => {
+    fixture = await setup();
+    // Neither vaultPath opt nor MULTILOGER_VAULT_PATH: fail closed.
+    expect(() => resolveProxyCredentials(vaultRecord())).toThrow(ProxyCredentialError);
+  });
+
+  it('throws ProxyCredentialError when the vault key is not set', async () => {
+    fixture = await setup();
+    const vaultPath = join(fixture.dir, 'vault.mlvault');
+    process.env.MULTILOGER_VAULT_KEY = randomBytes(32).toString('hex');
+    process.env.MULTILOGER_VAULT_PATH = vaultPath;
+    storeSecret(vaultPath, 'proxy-password', 's3cret');
+    // MULTILOGER_VAULT_KEY deliberately unset: the vault cannot be opened.
+    delete process.env.MULTILOGER_VAULT_KEY;
+    expect(() => resolveProxyCredentials(vaultRecord())).toThrow(ProxyCredentialError);
+  });
+
+  it('keeps resolving env: refs alongside vault: refs', async () => {
+    fixture = await setup();
+    useVault(fixture.dir, { 'proxy-password': 's3cret' });
+    process.env.TEST_PROXY_PASSWORD = 'hunter2';
+    try {
+      const record: ProxyRecord = { ...vaultRecord(), password_secret_ref: 'env:TEST_PROXY_PASSWORD' };
+      expect(resolveProxyCredentials(record)).toEqual({ username: 'alice', password: 'hunter2' });
+    } finally {
+      delete process.env.TEST_PROXY_PASSWORD;
+    }
+  });
+
+  it('launch gate passes a vault-credentialed proxy like an unauthenticated one', async () => {
+    const port = await dummyProxy();
+    const { db, profileId } = await assignVaultProxy(port);
+    useVault(fixture?.dir ?? '', { 'proxy-password': 's3cret' });
+
+    const flags = await resolveProxyForLaunch(db, profileId, 2000);
+    expect(flags).toEqual({ scheme: 'http', host: '127.0.0.1', port });
+  });
+
+  it('launch gate fails closed when the vault secret is dangling', async () => {
+    const port = await dummyProxy();
+    const { db, profileId } = await assignVaultProxy(port);
+    useVault(fixture?.dir ?? '', { 'unrelated': 'x' });
+
+    await expect(resolveProxyForLaunch(db, profileId, 2000)).rejects.toThrow(ProxyCredentialError);
+  });
+
+  it('launch gate still refuses env:-credentialed proxies: credentials come only from the vault', async () => {
+    fixture = await setup();
+    const { db, profileId } = fixture;
+    const port = await dummyProxy();
+    process.env.TEST_PROXY_PASSWORD = 'hunter2';
+    try {
+      const proxy = await createProxy(db, {
+        name: 'env-auth',
+        scheme: 'http',
+        host: '127.0.0.1',
+        port,
+        username: 'alice',
+        passwordSecretRef: 'env:TEST_PROXY_PASSWORD',
+      });
+      await assignProxyToProfile(db, profileId, proxy.id);
+      await expect(resolveProxyForLaunch(db, profileId, 2000)).rejects.toThrow(ProxyAuthUnsupportedError);
+    } finally {
+      delete process.env.TEST_PROXY_PASSWORD;
+    }
+  });
+
+  it('resolveProxyAuthForLaunch returns a lazy credential closure for vault proxies', async () => {
+    const port = await dummyProxy();
+    const { db, profileId, proxyId } = await assignVaultProxy(port);
+    const vaultPath = useVault(fixture?.dir ?? '', { 'proxy-password': 's3cret' });
+
+    const auth = await resolveProxyAuthForLaunch(db, profileId, { vaultPath });
+    expect(auth).toBeDefined();
+    expect(auth?.proxyId).toBe(proxyId);
+    // The password lives only inside the getCredentials closure: the returned
+    // object carries no secret material.
+    expect(Object.keys(auth ?? {}).sort()).toEqual(['getCredentials', 'proxyId']);
+    expect(JSON.stringify(auth)).not.toContain('s3cret');
+    expect(auth?.getCredentials()).toEqual({ username: 'alice', password: 's3cret' });
+  });
+
+  it('resolveProxyAuthForLaunch returns undefined when the proxy has no credentials', async () => {
+    fixture = await setup();
+    const { db, profileId } = fixture;
+    const port = await dummyProxy();
+    const proxy = await createProxy(db, {
+      name: 'plain',
+      scheme: 'http',
+      host: '127.0.0.1',
+      port,
+    });
+    await assignProxyToProfile(db, profileId, proxy.id);
+
+    await expect(resolveProxyAuthForLaunch(db, profileId)).resolves.toBeUndefined();
+  });
+
+  it('resolveProxyAuthForLaunch returns undefined when no proxy is assigned', async () => {
+    fixture = await setup();
+    await expect(resolveProxyAuthForLaunch(fixture.db, fixture.profileId)).resolves.toBeUndefined();
+  });
+
+  it('resolveProxyAuthForLaunch throws ProxyAuthUnsupportedError for env:-credentialed proxies', async () => {
+    fixture = await setup();
+    const { db, profileId } = fixture;
+    const port = await dummyProxy();
+    process.env.TEST_PROXY_PASSWORD = 'hunter2';
+    try {
+      const proxy = await createProxy(db, {
+        name: 'env-auth',
+        scheme: 'http',
+        host: '127.0.0.1',
+        port,
+        username: 'alice',
+        passwordSecretRef: 'env:TEST_PROXY_PASSWORD',
+      });
+      await assignProxyToProfile(db, profileId, proxy.id);
+      await expect(resolveProxyAuthForLaunch(db, profileId)).rejects.toThrow(ProxyAuthUnsupportedError);
+    } finally {
+      delete process.env.TEST_PROXY_PASSWORD;
+    }
+  });
 });

@@ -85,6 +85,12 @@ interface CdpConnection {
   /** Resolves when the socket closes for any reason. */
   closed: Promise<void>;
   close: () => void;
+  /**
+   * Register a handler for a CDP event broadcast (a message with `method`
+   * and no `id`). Connections that register nothing keep the old behavior:
+   * broadcasts are dropped.
+   */
+  onEvent: (event: string, handler: (params: unknown) => void) => void;
 }
 
 async function connectCdp(wsUrl: string, timeoutMs: number): Promise<CdpConnection> {
@@ -148,6 +154,7 @@ async function connectCdp(wsUrl: string, timeoutMs: number): Promise<CdpConnecti
 
   let nextId = 1;
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  const eventHandlers = new Map<string, Set<(params: unknown) => void>>();
   let recvBuf = Buffer.alloc(0);
   let closedResolve: () => void = () => {
     /* replaced below by the promise executor */
@@ -187,14 +194,35 @@ async function connectCdp(wsUrl: string, timeoutMs: number): Promise<CdpConnecti
       if (frame.opcode !== 0x1 || frame.payload.length === 0) {
         continue;
       }
-      let msg: { id?: number; result?: unknown; error?: { message?: string } };
+      let msg: {
+        id?: number;
+        method?: string;
+        params?: unknown;
+        result?: unknown;
+        error?: { message?: string };
+      };
       try {
         msg = JSON.parse(frame.payload.toString('utf8')) as typeof msg;
       } catch {
         continue;
       }
       if (typeof msg.id !== 'number') {
-        continue; // Event broadcast — no one is waiting on it here.
+        // Event broadcast: dispatch to registered handlers (createCdpEventSession).
+        // Connections with no handlers (sendCdpCommand) drop it, as before.
+        if (typeof msg.method === 'string') {
+          const handlers = eventHandlers.get(msg.method);
+          if (handlers) {
+            for (const handler of [...handlers]) {
+              try {
+                handler(msg.params);
+              } catch {
+                // A failing handler must not break the frame loop for the
+                // connection or for other handlers.
+              }
+            }
+          }
+        }
+        continue;
       }
       const waiter = pending.get(msg.id);
       if (!waiter) {
@@ -232,6 +260,14 @@ async function connectCdp(wsUrl: string, timeoutMs: number): Promise<CdpConnecti
     closed,
     close: () => {
       socket.destroy();
+    },
+    onEvent: (event, handler) => {
+      let set = eventHandlers.get(event);
+      if (!set) {
+        set = new Set();
+        eventHandlers.set(event, set);
+      }
+      set.add(handler);
     },
   };
 }
@@ -271,6 +307,36 @@ export async function sendCdpCommand(
   } finally {
     connection.close();
   }
+}
+
+/**
+ * A CDP session that stays open: request/response via send() plus
+ * subscriptions to event broadcasts via onEvent(). The caller owns the
+ * lifetime — close() when done; `closed` resolves when the socket drops.
+ */
+export interface CdpEventSession {
+  send: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
+  onEvent: (event: string, handler: (params: unknown) => void) => void;
+  close: () => void;
+  closed: Promise<void>;
+}
+
+/**
+ * Open a persistent raw-CDP session that can receive event broadcasts
+ * (e.g. Fetch.authRequired). Unlike sendCdpCommand, the connection stays
+ * open until close() is called.
+ */
+export async function createCdpEventSession(
+  wsUrl: string,
+  timeoutMs: number,
+): Promise<CdpEventSession> {
+  const connection = await connectCdp(wsUrl, timeoutMs);
+  return {
+    send: (method, params) => connection.send(method, params),
+    onEvent: (event, handler) => { connection.onEvent(event, handler); },
+    close: () => { connection.close(); },
+    closed: connection.closed,
+  };
 }
 
 /**
