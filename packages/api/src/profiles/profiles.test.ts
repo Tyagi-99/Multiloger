@@ -53,7 +53,9 @@ describe('stateMachine', () => {
     expect(await getState(db, profile.id)).toBe('created');
 
     const seen: ProfileDomainEvent[] = [];
-    const off = profileEvents.on((e) => seen.push(e));
+    const off = profileEvents.on((e) => {
+      seen.push(e);
+    });
 
     await transitionState(db, profile.id, 'launching');
     await transitionState(db, profile.id, 'running');
@@ -168,7 +170,9 @@ describe('profile locks', () => {
     dir = setup.dir;
     db = setup.db;
     const seen: ProfileDomainEvent[] = [];
-    const off = profileEvents.on((e) => seen.push(e));
+    const off = profileEvents.on((e) => {
+      seen.push(e);
+    });
     const owner = newOwnerToken();
     await acquireLock(db, setup.profile.id, owner, 30_000);
     await releaseLock(db, setup.profile.id, owner);

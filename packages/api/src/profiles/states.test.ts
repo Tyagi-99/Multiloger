@@ -12,7 +12,7 @@ import {
 
 describe('transition table', () => {
   it('allows exactly the documented legal transitions', () => {
-    const legal: Array<[ProfileState, ProfileState]> = [
+    const legal: [ProfileState, ProfileState][] = [
       ['created', 'launching'],
       ['launching', 'running'],
       ['launching', 'error'],
