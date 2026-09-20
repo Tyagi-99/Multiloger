@@ -7,6 +7,9 @@
 import type {
   ApiToken,
   AuditEntry,
+  AutomationJob,
+  AutomationRun,
+  AutomationScript,
   Backup,
   BackupVerification,
   Client,
@@ -22,6 +25,7 @@ import type {
   RemoteBackupObject,
   ResourceStatus,
   RoleInfo,
+  ScriptVersionNumber,
   Session,
   TeamUser,
   WindowSyncResult,
@@ -186,6 +190,31 @@ export interface ApiClient {
   pruneCloudObjects(): Promise<{ deleted: string[] }>;
 
   windowSync(profileIds: string[], url: string): Promise<WindowSyncResult>;
+
+  listScripts(): Promise<{ scripts: AutomationScript[] }>;
+  getScript(
+    id: string,
+    version?: number,
+  ): Promise<{ script: AutomationScript; versions: ScriptVersionNumber[] }>;
+  createScript(input: {
+    name: string;
+    description?: string;
+    steps: unknown[];
+  }): Promise<{ script: AutomationScript }>;
+  createScriptVersion(
+    id: string,
+    input: { description?: string; steps: unknown[] },
+  ): Promise<{ script: AutomationScript }>;
+  listJobs(): Promise<{ jobs: AutomationJob[] }>;
+  getJob(id: string): Promise<{ job: AutomationJob; runs: AutomationRun[] }>;
+  createJob(input: {
+    name: string;
+    scriptId: string;
+    scriptVersion?: number;
+    profileId: string;
+    timeoutMs?: number;
+  }): Promise<{ job: AutomationJob; run: AutomationRun }>;
+  listRuns(jobId?: string): Promise<{ runs: AutomationRun[] }>;
 }
 
 export function createApiClient(baseUrl: string, getToken: () => string | null): ApiClient {
@@ -365,6 +394,36 @@ export function createApiClient(baseUrl: string, getToken: () => string | null):
 
     windowSync: (profileIds: string[], url: string) =>
       post<WindowSyncResult>('/v1/window-sync', { profileIds, url }),
+
+    // -- automation (Phase 2 APIs, visual builder in Workflows page) --
+    listScripts: () => get<{ scripts: AutomationScript[] }>('/v1/automation/scripts'),
+    getScript: (id: string, version?: number) =>
+      get<{ script: AutomationScript; versions: ScriptVersionNumber[] }>(
+        `/v1/automation/scripts/${encodeURIComponent(id)}${version ? `?version=${String(version)}` : ''}`,
+      ),
+    createScript: (input: { name: string; description?: string; steps: unknown[] }) =>
+      post<{ script: AutomationScript }>('/v1/automation/scripts', input),
+    createScriptVersion: (id: string, input: { description?: string; steps: unknown[] }) =>
+      post<{ script: AutomationScript }>(
+        `/v1/automation/scripts/${encodeURIComponent(id)}/versions`,
+        input,
+      ),
+    listJobs: () => get<{ jobs: AutomationJob[] }>('/v1/automation/jobs'),
+    getJob: (id: string) =>
+      get<{ job: AutomationJob; runs: AutomationRun[] }>(
+        `/v1/automation/jobs/${encodeURIComponent(id)}`,
+      ),
+    createJob: (input: {
+      name: string;
+      scriptId: string;
+      scriptVersion?: number;
+      profileId: string;
+      timeoutMs?: number;
+    }) => post<{ job: AutomationJob; run: AutomationRun }>('/v1/automation/jobs', input),
+    listRuns: (jobId?: string) =>
+      get<{ runs: AutomationRun[] }>(
+        `/v1/automation/runs${jobId ? `?jobId=${encodeURIComponent(jobId)}` : ''}`,
+      ),
   };
 }
 

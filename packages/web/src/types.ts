@@ -255,3 +255,46 @@ export interface WindowSyncResult {
   synced: string[];
   failed: { profileId: string; error: string }[];
 }
+
+/** Phase 2 automation script (latest version view). */
+export interface AutomationScript {
+  id: string;
+  name: string;
+  version: number;
+  description?: string;
+  steps: unknown[];
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  versionCount?: number;
+}
+
+/** One historical version of an automation script: the API lists version numbers. */
+export type ScriptVersionNumber = number;
+
+/** Phase 2 automation job: a script version pinned to one profile. */
+export interface AutomationJob {
+  id: string;
+  name: string;
+  scriptId: string;
+  scriptVersion: number;
+  profileId: string;
+  status: string;
+  timeoutMs: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One execution of an automation job. */
+export interface AutomationRun {
+  id: string;
+  jobId: string;
+  profileId: string;
+  status: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  artifactCount: number;
+  createdAt: string;
+  updatedAt: string;
+}

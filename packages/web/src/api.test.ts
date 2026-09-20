@@ -222,3 +222,52 @@ describe('windowSync client', () => {
     expect(result.failed).toEqual([{ profileId: 'p2', error: 'profile is not running' }]);
   });
 });
+
+describe('automation client', () => {
+  it('creates scripts and versions at the Phase 2 endpoints', async () => {
+    const calls: { url: string; method: string | undefined; body?: unknown }[] = [];
+    stubFetch((req) => {
+      calls.push({
+        url: req.url,
+        method: req.init.method,
+        body: req.init.body ? JSON.parse(req.init.body as string) : undefined,
+      });
+      return jsonResponse(201, { script: { id: 's1', version: 1 } });
+    });
+    const client = createApiClient('http://api:3000', () => 'mlt_secret');
+    const steps = [{ type: 'wait', ms: 100 }];
+    await client.createScript({ name: 'n', steps });
+    await client.createScriptVersion('s1', { steps });
+    expect(calls[0]).toMatchObject({
+      url: 'http://api:3000/v1/automation/scripts',
+      method: 'POST',
+      body: { name: 'n', steps },
+    });
+    expect(calls[1]).toMatchObject({
+      url: 'http://api:3000/v1/automation/scripts/s1/versions',
+      method: 'POST',
+      body: { steps },
+    });
+  });
+
+  it('fetches script versions and creates jobs', async () => {
+    const calls: string[] = [];
+    stubFetch((req) => {
+      calls.push(`${req.init.method ?? 'GET'} ${req.url}`);
+      return jsonResponse(200, { script: { id: 's1' }, versions: [] });
+    });
+    const client = createApiClient('http://api:3000', () => 'mlt_secret');
+    await client.getScript('s1', 2);
+    await client.createJob({ name: 'j', scriptId: 's1', profileId: 'p1' });
+    await client.listScripts();
+    await client.listJobs();
+    await client.listRuns('j1');
+    expect(calls).toEqual([
+      'GET http://api:3000/v1/automation/scripts/s1?version=2',
+      'POST http://api:3000/v1/automation/jobs',
+      'GET http://api:3000/v1/automation/scripts',
+      'GET http://api:3000/v1/automation/jobs',
+      'GET http://api:3000/v1/automation/runs?jobId=j1',
+    ]);
+  });
+});

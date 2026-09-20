@@ -15,6 +15,7 @@ import { TokensPage } from './pages/Tokens.js';
 import { BackupsPage } from './pages/Backups.js';
 import { MonitoringPage } from './pages/Monitoring.js';
 import { CloudSyncPage } from './pages/CloudSync.js';
+import { WorkflowsPage } from './pages/Workflows.js';
 import { TeamPage } from './pages/Team.js';
 import { AuditPage } from './pages/Audit.js';
 import { Button, Field, inputClass } from './ui.js';
@@ -26,6 +27,7 @@ type Page =
   | 'proxies'
   | 'backups'
   | 'cloudsync'
+  | 'workflows'
   | 'tokens'
   | 'team'
   | 'audit'
@@ -37,6 +39,7 @@ const ALL_NAV: { id: Page; label: string; permission: string }[] = [
   { id: 'proxies', label: 'Proxies', permission: 'proxies:read' },
   { id: 'backups', label: 'Backups', permission: 'backups:read' },
   { id: 'cloudsync', label: 'Cloud sync', permission: 'backups:read' },
+  { id: 'workflows', label: 'Workflows', permission: 'automation:read' },
   { id: 'monitoring', label: 'Monitoring', permission: 'monitoring:read' },
   { id: 'tokens', label: 'API tokens', permission: 'tokens:read' },
   { id: 'team', label: 'Team', permission: 'users:manage' },
@@ -317,6 +320,7 @@ function Dashboard(): React.JSX.Element {
         {page === 'proxies' && <ProxiesPage client={client} />}
         {page === 'backups' && <BackupsPage client={client} eventCount={eventCount} />}
         {page === 'cloudsync' && <CloudSyncPage client={client} identity={identity} />}
+        {page === 'workflows' && <WorkflowsPage client={client} identity={identity} />}
         {page === 'tokens' && <TokensPage client={client} />}
         {page === 'team' && <TeamPage client={client} identity={identity} />}
         {page === 'audit' && <AuditPage client={client} />}
