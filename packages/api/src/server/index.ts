@@ -26,6 +26,7 @@ import { ProfileManager } from '../profiles/manager.js';
 import { getState } from '../profiles/stateMachine.js';
 import { ResourceManager, type ResourceManagerOptions } from '../resources/manager.js';
 import { BackupService } from '../backups/service.js';
+import { findStaticFile, resolveStaticFile, serveStaticFile } from './static.js';
 import { resolveProxyForLaunch } from '../proxies/service.js';
 import { authenticateRequest, createApiToken } from './tokens.js';
 import { TokenBucketLimiter, type RateLimitOptions } from './rateLimit.js';
@@ -61,6 +62,12 @@ export interface ServerOptions {
     backupsDir?: string;
     retention?: number;
   };
+  /**
+   * Directory holding the built dashboard (Task 10). When set, GET/HEAD
+   * requests that match no API route are served from disk (SPA fallback to
+   * index.html); /v1/* and /health are never served statically.
+   */
+  webDir?: string;
 }
 
 export interface RunningServer {
@@ -205,6 +212,20 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
     try {
       const matched = matchRoute(routes, method, url.pathname);
       if (!matched) {
+        if (
+          options.webDir !== undefined &&
+          (method === 'GET' || method === 'HEAD')
+        ) {
+          const resolved = resolveStaticFile(options.webDir, url.pathname);
+          if (resolved) {
+            const found = await findStaticFile(options.webDir, resolved);
+            if (found) {
+              await serveStaticFile(res, found);
+              finish(res.statusCode);
+              return;
+            }
+          }
+        }
         const { status, body } = httpErrorBody(404, 'NOT_FOUND', `No route: ${method} ${url.pathname}`);
         sendJson(res, status, body);
         finish(status);
