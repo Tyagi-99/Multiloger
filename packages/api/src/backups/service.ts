@@ -200,13 +200,17 @@ export class BackupService {
             created_at: createdAt,
           })
           .execute();
-        await this.enforceRetention(profileId);
       } catch (error) {
-        // The encrypted blob is already at its final path: remove it so a
-        // failed insert never leaves an unreferenced file behind.
+        // The insert failed, so no row references the encrypted blob: remove
+        // it so a failed insert never leaves an unreferenced file behind.
         rmSync(this.filePath(id), { force: true });
         throw error;
       }
+      // Retention runs only after the backup row is committed, and outside
+      // the cleanup above: it must never delete the new backup's file. A
+      // retention failure therefore surfaces as an error while the new
+      // backup stays valid and listed.
+      await this.enforceRetention(profileId);
       return {
         id,
         profileId,

@@ -408,6 +408,23 @@ describe('BackupService', () => {
     expect(leftovers.filter((f) => f.startsWith('.tmp-'))).toHaveLength(0);
   });
 
+  it('keeps the new backup file and row when retention fails after insert', async () => {
+    fixture = await setupService();
+    const { service, profileId } = fixture;
+    // Fail exactly at the retention step, after the insert has committed:
+    // the new backup must survive, row and file consistent.
+    const shadowed = service as unknown as {
+      enforceRetention: (profileId: string) => Promise<void>;
+    };
+    shadowed.enforceRetention = () => Promise.reject(new Error('simulated retention failure'));
+    await expect(service.createBackup(profileId)).rejects.toThrow('simulated retention failure');
+    const listed = await service.listBackups(profileId);
+    expect(listed).toHaveLength(1);
+    const verified = await service.verifyBackup(listed[0]?.id ?? '');
+    expect(verified.ok).toBe(true);
+    expect(verified.sha256Match).toBe(true);
+  });
+
   it('restores a backup after its source profile was deleted', async () => {
     fixture = await setupService();
     const { db, service, profileId, clientId } = fixture;
